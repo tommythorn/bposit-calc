@@ -35,6 +35,30 @@ fn main() {
     c.binary("div"); // 1/0 = NaR
     cases.push(("nar-and-zero".into(), c.state_json()));
 
+    // The tie that prompted the inspector: 60 + 2 in BPosit8.
+    let mut c = Calc::new();
+    c.set_format(0);
+    c.push_decimal("60");
+    c.push_decimal("2");
+    c.binary("add");
+    cases.push(("tie-60-plus-2".into(), c.state_json()));
+
+    // A non-terminating exact result.
+    let mut c = Calc::new();
+    c.set_format(0);
+    c.push_decimal("1");
+    c.push_decimal("3");
+    c.binary("div");
+    cases.push(("one-third".into(), c.state_json()));
+
+    // Saturation past maxpos.
+    let mut c = Calc::new();
+    c.set_format(0);
+    c.push_decimal("200");
+    c.push_decimal("200");
+    c.binary("mul");
+    cases.push(("saturate".into(), c.state_json()));
+
     // An error state.
     let mut c = Calc::new();
     c.binary("add");

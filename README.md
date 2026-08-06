@@ -78,6 +78,38 @@ way to go exploring the encoding.
 Switching format converts the values on the stack rather than reinterpreting the bits, so you can
 watch the same number re-encode itself as you move between formats.
 
+## The rounding inspector
+
+Every value on the stack got there somehow, and the panel shows what that cost. For the last
+operation it gives the **exact** real result, what it was rounded to, where it landed between the
+two representable values that bracket it, and the relative error. Below that are the neighbouring
+values and the size of the gaps to them — which is what "precision" means concretely.
+
+The exact result is genuinely exact: sums, differences and products of posits are dyadic, but
+quotients are not (`1/3` has no finite binary expansion), so it is computed with real rational
+arithmetic and flagged when the expansion does not terminate.
+
+This answers the question that looks most like a bug. In BPosit8, `60 + 2` rounds **up** to 64,
+but `64 - 2` stays at 64:
+
+```
+asked   60 + 2
+exact   62
+stored  64
+        --------------------------O|--------------------------
+        60                                                  64
+        01101111 odd                             01110000 even
+     -> EXACT TIE: goes to the even encoding
+```
+
+The grid there runs ..56, 60, 64, 72.. so 62 is *exactly* halfway and both operations hit the same
+tie. Ties go to the even encoding, and 64's pattern (112) is even where 60's (111) is odd. It is
+not an upward bias — `56 + 2` is the tie between 56 (even) and 60 (odd), so it rounds *down*. That
+rule is what stops repeated rounding from drifting.
+
+Typing a literal is inspected too, which is the quickest way to see what a format cannot hold:
+enter `0.1` in BPosit64 and watch it land 20% of the way between two neighbours 4.34e-19 apart.
+
 ## Correctness
 
 The bit-field decoder is independent of the arithmetic, so the two check each other. `cargo test`
@@ -92,7 +124,9 @@ verifies, among other things:
 - an exhaustive 16-bit decimal round-trip, and a BPosit64 round-trip through expansions hundreds of
   digits long;
 - that bit patterns are monotonically ordered by value, which the encoder's binary search relies on;
-- that nothing nonzero ever rounds to zero or to NaR.
+- that nothing nonzero ever rounds to zero or to NaR;
+- that ties round to the even encoding, checked against both `fast-posit`'s arithmetic and our own
+  decimal rounder, which share no code and must break ties alike.
 
 ### Why the decimal display avoids `f64`
 

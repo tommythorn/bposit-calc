@@ -447,3 +447,113 @@ footer a { color: #8fb8ff; }
   footer { text-align: left; padding: 0.7rem 1rem; font-size: 0.72rem; }
   .anatomy .headline { font-size: 1.35rem; }
 }
+
+/* --------------------------------------------------------------- rounding inspector */
+
+.rounding, .neighbours {
+  margin: 0.9rem 0;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--line);
+}
+
+.roundrow {
+  display: grid;
+  grid-template-columns: 3.4rem minmax(0, 1fr);
+  gap: 0.5rem;
+  align-items: baseline;
+  padding: 0.1rem 0;
+  font-size: 0.78rem;
+}
+
+.roundrow .rk {
+  color: var(--dim);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.roundrow .rv { color: var(--ink); overflow-wrap: anywhere; }
+
+/* The interval between the two representable values bracketing the exact result. */
+.ulpbar {
+  position: relative;
+  height: 1.5rem;
+  margin: 0.7rem 0 0.2rem;
+  border-radius: 4px;
+  background: linear-gradient(90deg, rgba(94, 230, 168, 0.16), rgba(232, 121, 249, 0.16));
+  border: 1px solid var(--line);
+}
+
+/* The halfway point: past here, rounding flips to the other neighbour. */
+.ulpbar .tick {
+  position: absolute;
+  left: 50%;
+  top: -3px;
+  bottom: -3px;
+  width: 0;
+  border-left: 1px dashed var(--dim);
+}
+
+/* Where the exact result actually fell. */
+.ulpbar .mark {
+  position: absolute;
+  left: var(--p);
+  top: 50%;
+  width: 9px;
+  height: 9px;
+  margin: -4.5px 0 0 -4.5px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.45);
+}
+
+.ulpends {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.6rem;
+  font-size: 0.62rem;
+  color: var(--dim);
+  overflow-wrap: anywhere;
+}
+
+.ulpends span:last-child { text-align: right; }
+
+.rounding .verdict {
+  margin-top: 0.5rem;
+  font-size: 0.75rem;
+  padding: 0.45rem 0.6rem;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--dim);
+}
+
+.rounding .verdict.differs { color: #ffd3ab; background: rgba(255, 159, 69, 0.09); }
+.rounding .verdict b { color: var(--ink); }
+
+.nrow {
+  display: grid;
+  grid-template-columns: 2.6rem minmax(0, 1fr) auto;
+  gap: 0.5rem;
+  align-items: baseline;
+  padding: 0.18rem 0;
+  font-size: 0.74rem;
+  border-bottom: 1px dashed rgba(255, 255, 255, 0.05);
+}
+
+.nrow .nk {
+  color: var(--dim);
+  font-size: 0.66rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.nrow .nv { overflow-wrap: anywhere; color: var(--dim); }
+.nrow .nv.end { font-style: italic; }
+.nrow .ng { color: var(--c-exp); font-size: 0.68rem; white-space: nowrap; }
+
+/* The value itself, between its two neighbours. */
+.nrow.self { background: rgba(94, 230, 168, 0.07); border-radius: 4px; }
+.nrow.self .nv { color: #8ff0b5; }
+.nrow.self .nk { color: var(--c-frac); }
+
+.ulpends .par { color: var(--dim); font-size: 0.92em; opacity: 0.8; }

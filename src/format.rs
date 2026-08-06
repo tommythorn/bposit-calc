@@ -10,6 +10,7 @@
 
 use crate::bignum::Big;
 use crate::bits::{decode, mask_n, Fields, Special, HIDDEN_BIT};
+use crate::rational::Rational;
 use core::cmp::Ordering;
 use fast_posit::{Posit, RoundFrom};
 
@@ -213,6 +214,63 @@ pub fn from_f64(fmt: Format, v: f64) -> u64 {
 }
 
 // ---------------------------------------------------------------------------------------------
+// Exact results, for the rounding inspector
+// ---------------------------------------------------------------------------------------------
+
+/// The exact value a bit pattern denotes. `None` for NaR, which is not a number.
+pub fn rational_of(fmt: Format, bits: u64) -> Option<Rational> {
+    let d = fmt.decode(bits);
+    match d.special {
+        Some(Special::NaR) => None,
+        Some(Special::Zero) => Some(Rational::zero()),
+        None => Some(Rational::from_significand(d.neg, d.frac, d.total_exp)),
+    }
+}
+
+/// The exact result of a binary operation, *before* it was rounded back into the format.
+///
+/// `None` when an operand is NaR or the divisor is zero — cases where there is no real number to
+/// compare the rounded answer against.
+pub fn exact_bin(fmt: Format, op: BinOp, a: u64, b: u64) -> Option<Rational> {
+    let x = rational_of(fmt, a)?;
+    let y = rational_of(fmt, b)?;
+    match op {
+        BinOp::Add => Some(x.add(&y)),
+        BinOp::Sub => Some(x.sub(&y)),
+        BinOp::Mul => Some(x.mul(&y)),
+        BinOp::Div => x.div(&y),
+    }
+}
+
+/// The exact result of a unary operation, before rounding.
+pub fn exact_un(fmt: Format, op: UnOp, a: u64) -> Option<Rational> {
+    let x = rational_of(fmt, a)?;
+    match op {
+        UnOp::Neg => Some(x.negated()),
+        UnOp::Recip => Rational::from_int(1).div(&x),
+        UnOp::Double => Some(x.mul(&Rational::from_int(2))),
+        UnOp::Half => x.div(&Rational::from_int(2)),
+    }
+}
+
+/// The adjacent representable value, or `None` at the ends of the range.
+///
+/// Bit patterns are ordered by value, so stepping the pattern by one steps to the neighbour.
+/// `fast-posit`'s own `next`/`prior` wrap around through NaR; here running off the end is
+/// reported instead, because for the display "there is nothing beyond this" is the useful fact.
+pub fn neighbour(fmt: Format, bits: u64, up: bool) -> Option<u64> {
+    if bits == fmt.nar_bits() {
+        return None;
+    }
+    let stepped = if up {
+        bits.wrapping_add(1)
+    } else {
+        bits.wrapping_sub(1)
+    } & fmt.mask();
+    (stepped != fmt.nar_bits()).then_some(stepped)
+}
+
+// ---------------------------------------------------------------------------------------------
 // Exact conversion into a format
 // ---------------------------------------------------------------------------------------------
 
@@ -309,15 +367,8 @@ impl Target for DecimalTarget {
         // their sum a single exact integer at that scale.
         let base = lo.exp.min(hi.exp);
         let sum = scale_to(lo, base) + scale_to(hi, base);
-        self.cmp_scaled(big_from_u128(sum), base - HIDDEN_BIT as i64, 1)
+        self.cmp_scaled(Big::from_u128(sum), base - HIDDEN_BIT as i64, 1)
     }
-}
-
-fn big_from_u128(v: u128) -> Big {
-    let mut hi = Big::from_u64((v >> 64) as u64);
-    hi.shl_bits(64);
-    hi.add(&Big::from_u64(v as u64));
-    hi
 }
 
 /// Round a positive target magnitude into `fmt`, returning the bit pattern.
@@ -384,12 +435,16 @@ pub fn convert(from: Format, to: Format, bits: u64) -> u64 {
     }
 }
 
-/// Parse a decimal literal and round it into `fmt`, exactly.
-///
-/// This deliberately does not route through `f64`: BPosit64 carries up to 58 significand bits, so
-/// an `f64` intermediate cannot even represent most of the format, let alone round to it
-/// correctly.
-pub fn from_decimal(fmt: Format, s: &str) -> Option<u64> {
+/// A parsed decimal literal: `±mantissa × 10^exp10`, plus its significant-digit count.
+struct ParsedDecimal {
+    neg: bool,
+    mantissa: Big,
+    exp10: i32,
+    sig_digits: i64,
+}
+
+/// Parse `[+-]ddd.ddd[eNN]`, allowing `_` separators. `None` if it is not a number.
+fn parse_decimal(s: &str) -> Option<ParsedDecimal> {
     let s = s.trim();
     if s.is_empty() {
         return None;
@@ -411,8 +466,7 @@ pub fn from_decimal(fmt: Format, s: &str) -> Option<u64> {
         exp_part.parse().ok()?
     };
 
-    // Accumulate the digits, tracking how far the point moved.
-    let mut mantissa = Big::from_u64(0);
+    let mut mantissa = Big::zero();
     let mut seen_digit = false;
     let mut seen_point = false;
     // Digits from the first nonzero onwards, so `mantissa` has exactly this many digits.
@@ -443,6 +497,33 @@ pub fn from_decimal(fmt: Format, s: &str) -> Option<u64> {
     if !seen_digit {
         return None;
     }
+
+    Some(ParsedDecimal {
+        neg,
+        mantissa,
+        exp10,
+        sig_digits,
+    })
+}
+
+/// The exact value of a decimal literal, for showing what rounding it into a format cost.
+pub fn decimal_rational(s: &str) -> Option<Rational> {
+    let p = parse_decimal(s)?;
+    Some(Rational::from_decimal_parts(p.neg, p.mantissa, p.exp10))
+}
+
+/// Parse a decimal literal and round it into `fmt`, exactly.
+///
+/// This deliberately does not route through `f64`: BPosit64 carries up to 58 significand bits, so
+/// an `f64` intermediate cannot even represent most of the format, let alone round to it
+/// correctly.
+pub fn from_decimal(fmt: Format, s: &str) -> Option<u64> {
+    let ParsedDecimal {
+        neg,
+        mantissa,
+        exp10,
+        sig_digits,
+    } = parse_decimal(s)?;
 
     if mantissa.is_zero() {
         return Some(0);

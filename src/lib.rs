@@ -8,13 +8,26 @@ mod bignum;
 mod bits;
 mod decimal;
 mod format;
+mod rational;
 
 use bits::{bitstring, Special};
+use core::cmp::Ordering;
 use format::{BinOp, Format, UnOp};
+use rational::Rational;
 use wasm_bindgen::prelude::*;
 
 /// Significant digits shown in the main decimal readout.
 const DISPLAY_SIG_DIGITS: usize = 20;
+
+/// What produced the current level 1, kept so the inspector can show what was rounded away.
+struct LastOp {
+    /// Human-readable form of what was asked for, e.g. `60 + 2`.
+    expr: String,
+    /// The exact real result, before it was forced back into the format.
+    exact: Rational,
+    /// The bit pattern it rounded to.
+    result: u64,
+}
 
 #[wasm_bindgen]
 pub struct Calc {
@@ -22,6 +35,7 @@ pub struct Calc {
     /// Bit patterns, last element is stack level 1 (the top).
     stack: Vec<u64>,
     error: Option<String>,
+    last: Option<LastOp>,
 }
 
 #[wasm_bindgen]
@@ -32,6 +46,7 @@ impl Calc {
             fmt: Format::B16,
             stack: Vec::new(),
             error: None,
+            last: None,
         }
     }
 
@@ -50,6 +65,8 @@ impl Calc {
         }
         self.fmt = to;
         self.error = None;
+        // Every value was re-rounded, so the recorded operation no longer describes level 1.
+        self.last = None;
     }
 
     #[wasm_bindgen(js_name = formatIndex)]
@@ -64,6 +81,13 @@ impl Calc {
             Some(bits) => {
                 self.stack.push(bits);
                 self.error = None;
+                // Typing a literal is itself a rounding worth inspecting: 0.1 is not
+                // representable in any of these formats.
+                self.last = format::decimal_rational(s).map(|exact| LastOp {
+                    expr: s.trim().to_string(),
+                    exact,
+                    result: bits,
+                });
                 true
             }
             None => {
@@ -90,6 +114,8 @@ impl Calc {
             Some(v) => {
                 self.stack.push(v & self.fmt.mask());
                 self.error = None;
+                // A raw pattern is not a rounding of anything.
+                self.last = None;
                 true
             }
             None => {
@@ -117,8 +143,24 @@ impl Calc {
         }
         let y = self.stack.pop().unwrap();
         let x = self.stack.pop().unwrap();
-        self.stack.push(format::bin_op(self.fmt, op, x, y));
+        let result = format::bin_op(self.fmt, op, x, y);
+        self.stack.push(result);
         self.error = None;
+        self.last = format::exact_bin(self.fmt, op, x, y).map(|exact| LastOp {
+            expr: format!(
+                "{} {} {}",
+                self.decimal_of(x, 12),
+                match op {
+                    BinOp::Add => "+",
+                    BinOp::Sub => "\u{2212}",
+                    BinOp::Mul => "\u{00d7}",
+                    BinOp::Div => "\u{00f7}",
+                },
+                self.decimal_of(y, 12)
+            ),
+            exact,
+            result,
+        });
     }
 
     /// Apply a unary operation to level 1.
@@ -138,8 +180,19 @@ impl Calc {
             return;
         }
         let x = self.stack.pop().unwrap();
-        self.stack.push(format::un_op(self.fmt, op, x));
+        let result = format::un_op(self.fmt, op, x);
+        self.stack.push(result);
         self.error = None;
+        self.last = format::exact_un(self.fmt, op, x).map(|exact| LastOp {
+            expr: match op {
+                UnOp::Neg => format!("\u{2212}({})", self.decimal_of(x, 12)),
+                UnOp::Recip => format!("1 \u{00f7} {}", self.decimal_of(x, 12)),
+                UnOp::Double => format!("{} \u{00d7} 2", self.decimal_of(x, 12)),
+                UnOp::Half => format!("{} \u{00f7} 2", self.decimal_of(x, 12)),
+            },
+            exact,
+            result,
+        });
     }
 
     #[wasm_bindgen(js_name = dropTop)]
@@ -149,6 +202,7 @@ impl Calc {
         } else {
             self.error = None;
         }
+        self.last = None;
     }
 
     pub fn swap(&mut self) {
@@ -159,6 +213,7 @@ impl Calc {
         }
         self.stack.swap(n - 1, n - 2);
         self.error = None;
+        self.last = None;
     }
 
     pub fn dup(&mut self) {
@@ -166,6 +221,7 @@ impl Calc {
             Some(v) => {
                 self.stack.push(v);
                 self.error = None;
+                self.last = None;
             }
             None => self.error = Some("stack is empty".into()),
         }
@@ -174,6 +230,7 @@ impl Calc {
     pub fn clear(&mut self) {
         self.stack.clear();
         self.error = None;
+        self.last = None;
     }
 
     /// Everything the UI needs, as JSON.
@@ -190,9 +247,159 @@ impl Calc {
             s.push_str(&self.entry_json(*bits));
         }
         s.push(']');
+        s.push_str(",\"lastOp\":");
+        s.push_str(&self.last_op_json());
+        s.push_str(",\"neighbours\":");
+        match self.stack.last() {
+            Some(bits) => s.push_str(&self.neighbours_json(*bits)),
+            None => s.push_str("null"),
+        }
         s.push_str(",\"error\":");
         match &self.error {
             Some(e) => push_json_string(&mut s, e),
+            None => s.push_str("null"),
+        }
+        s.push('}');
+        s
+    }
+
+    /// The value of a bit pattern as decimal text, to `sig` significant digits.
+    fn decimal_of(&self, bits: u64, sig: usize) -> String {
+        let d = self.fmt.decode(bits);
+        match d.special {
+            Some(Special::Zero) => "0".to_string(),
+            Some(Special::NaR) => "NaR".to_string(),
+            None => {
+                let sci = decimal::exact_sci(d.frac, d.total_exp - bits::HIDDEN_BIT as i64);
+                decimal::render(d.neg, &sci, sig).0
+            }
+        }
+    }
+
+    /// `{decimal, bits}` for one neighbouring value.
+    fn brief_json(&self, bits: u64) -> String {
+        let mut s = String::from("{\"decimal\":");
+        push_json_string(&mut s, &self.decimal_of(bits, DISPLAY_SIG_DIGITS));
+        s.push_str(",\"bits\":");
+        push_json_string(&mut s, &bitstring(bits, self.fmt.n()));
+        s.push('}');
+        s
+    }
+
+    /// The values either side of level 1, and the size of the steps to them.
+    ///
+    /// The gaps are what "precision" means concretely: they widen as the exponent grows, and the
+    /// regime cap is what stops them widening without bound.
+    fn neighbours_json(&self, bits: u64) -> String {
+        let fmt = self.fmt;
+        let Some(here) = format::rational_of(fmt, bits) else {
+            return "null".to_string();
+        };
+        let mut s = String::from("{");
+        for (i, (key, up)) in [("prior", false), ("next", true)].iter().enumerate() {
+            if i > 0 {
+                s.push(',');
+            }
+            s.push_str(&format!("\"{key}\":"));
+            match format::neighbour(fmt, bits, *up) {
+                Some(nb) => s.push_str(&self.brief_json(nb)),
+                None => s.push_str("null"),
+            }
+            s.push_str(&format!(
+                ",\"{}\":",
+                if *up { "gapAbove" } else { "gapBelow" }
+            ));
+            match format::neighbour(fmt, bits, *up).and_then(|nb| format::rational_of(fmt, nb)) {
+                Some(other) => {
+                    let gap = if *up {
+                        other.sub(&here)
+                    } else {
+                        here.sub(&other)
+                    };
+                    push_json_string(&mut s, &gap.to_decimal(8).0);
+                }
+                None => s.push_str("null"),
+            }
+        }
+        s.push('}');
+        s
+    }
+
+    /// What the last operation produced exactly, and what rounding did to it.
+    fn last_op_json(&self) -> String {
+        let fmt = self.fmt;
+        let Some(last) = &self.last else {
+            return "null".to_string();
+        };
+        // Only describes level 1 while level 1 is still that result.
+        if self.stack.last() != Some(&last.result) {
+            return "null".to_string();
+        }
+        let Some(rounded) = format::rational_of(fmt, last.result) else {
+            return "null".to_string();
+        };
+        let exact = &last.exact;
+
+        let mut s = String::from("{\"expr\":");
+        push_json_string(&mut s, &last.expr);
+        let (text, whole) = exact.to_decimal(DISPLAY_SIG_DIGITS);
+        s.push_str(",\"exact\":");
+        push_json_string(&mut s, &text);
+        s.push_str(&format!(
+            ",\"exactShown\":{},\"terminating\":{}",
+            whole,
+            exact.is_terminating()
+        ));
+        s.push_str(",\"rounded\":");
+        push_json_string(&mut s, &self.decimal_of(last.result, DISPLAY_SIG_DIGITS));
+
+        if exact.cmp(&rounded) == Ordering::Equal {
+            s.push_str(",\"wasRounded\":false}");
+            return s;
+        }
+        s.push_str(",\"wasRounded\":true");
+
+        // The exact result lies between the answer and one of its neighbours; which side depends
+        // on whether rounding went up or down.
+        let below = exact.cmp(&rounded) == Ordering::Less;
+        let (lo_bits, hi_bits) = if below {
+            (
+                format::neighbour(fmt, last.result, false),
+                Some(last.result),
+            )
+        } else {
+            (Some(last.result), format::neighbour(fmt, last.result, true))
+        };
+
+        match (lo_bits, hi_bits) {
+            (Some(lo), Some(hi)) => {
+                let (rlo, rhi) = (
+                    format::rational_of(fmt, lo).unwrap(),
+                    format::rational_of(fmt, hi).unwrap(),
+                );
+                let gap = rhi.sub(&rlo);
+                let offset = exact.sub(&rlo);
+                // An exact tie is offset·2 == gap, which is what sends the answer to the even
+                // encoding rather than to the nearer neighbour.
+                let tie = offset.mul(&Rational::from_int(2)).cmp(&gap) == Ordering::Equal;
+                s.push_str(&format!(",\"saturated\":false,\"tie\":{tie}"));
+                s.push_str(",\"position\":");
+                match offset.div(&gap) {
+                    Some(p) => push_json_string(&mut s, &p.to_decimal(6).0),
+                    None => s.push_str("null"),
+                }
+                s.push_str(",\"lo\":");
+                s.push_str(&self.brief_json(lo));
+                s.push_str(",\"hi\":");
+                s.push_str(&self.brief_json(hi));
+            }
+            // Ran off the end of the range: posits saturate rather than overflow.
+            _ => s.push_str(",\"saturated\":true,\"tie\":false,\"position\":null"),
+        }
+
+        s.push_str(",\"relError\":");
+        match exact.sub(&rounded).abs().div(&exact.abs()) {
+            Some(rel) => push_json_string(&mut s, &rel.to_decimal(4).0),
             None => s.push_str("null"),
         }
         s.push('}');
@@ -385,6 +592,116 @@ mod tests {
         c.clear();
         assert!(c.push_bits("0b01000000"));
         assert!(c.state_json().contains("\"decimal\":\"1\""));
+    }
+
+    /// The inspector must explain the tie that makes 60 + 2 and 64 - 2 both land on 64.
+    #[test]
+    fn inspector_reports_an_exact_tie() {
+        let mut c = Calc::new();
+        c.set_format(0); // BPosit8
+        c.push_decimal("60");
+        c.push_decimal("2");
+        c.binary("add");
+        let s = c.state_json();
+        assert!(s.contains("\"exact\":\"62\""), "{s}");
+        assert!(s.contains("\"rounded\":\"64\""), "{s}");
+        assert!(s.contains("\"tie\":true"), "{s}");
+        assert!(s.contains("\"position\":\"0.5\""), "{s}");
+        assert!(s.contains("\"saturated\":false"), "{s}");
+    }
+
+    /// An exactly representable result must not be dressed up as a rounding.
+    #[test]
+    fn inspector_reports_exact_results() {
+        let mut c = Calc::new();
+        c.set_format(2);
+        c.push_decimal("3");
+        c.push_decimal("5");
+        c.binary("add");
+        let s = c.state_json();
+        assert!(s.contains("\"wasRounded\":false"), "{s}");
+        assert!(s.contains("\"exact\":\"8\""), "{s}");
+    }
+
+    /// 1/3 has no finite expansion, so the exact value must be flagged as non-terminating rather
+    /// than presented as if the shown digits were all of it.
+    #[test]
+    fn inspector_flags_non_terminating_results() {
+        let mut c = Calc::new();
+        c.set_format(0);
+        c.push_decimal("1");
+        c.push_decimal("3");
+        c.binary("div");
+        let s = c.state_json();
+        assert!(s.contains("\"terminating\":false"), "{s}");
+        assert!(s.contains("\"exactShown\":false"), "{s}");
+        assert!(s.contains("\"exact\":\"0.33333333333333333333\""), "{s}");
+    }
+
+    /// Past maxpos there is no bracketing pair, so it must be reported as saturation.
+    #[test]
+    fn inspector_reports_saturation() {
+        let mut c = Calc::new();
+        c.set_format(0);
+        c.push_decimal("200");
+        c.push_decimal("200");
+        c.binary("mul");
+        let s = c.state_json();
+        assert!(s.contains("\"saturated\":true"), "{s}");
+        assert!(s.contains("\"position\":null"), "{s}");
+        assert!(s.contains("\"rounded\":\"240\""), "{s}");
+    }
+
+    /// Typing a literal is itself a rounding, and worth inspecting.
+    #[test]
+    fn inspector_covers_entry_rounding() {
+        let mut c = Calc::new();
+        c.set_format(3); // BPosit64
+        c.push_decimal("0.1");
+        let s = c.state_json();
+        assert!(s.contains("\"expr\":\"0.1\""), "{s}");
+        assert!(s.contains("\"exact\":\"0.1\""), "{s}");
+        assert!(s.contains("\"wasRounded\":true"), "{s}");
+    }
+
+    /// The inspector describes level 1; once level 1 is something else it must go quiet rather
+    /// than keep explaining a value that is no longer there.
+    #[test]
+    fn inspector_clears_when_it_no_longer_applies() {
+        let mut c = Calc::new();
+        c.set_format(0);
+        c.push_decimal("60");
+        c.push_decimal("2");
+        c.binary("add");
+        assert!(c.state_json().contains("\"tie\":true"));
+
+        c.drop_top();
+        assert!(c.state_json().contains("\"lastOp\":null"));
+
+        // A format switch re-rounds everything, so the recorded operation no longer applies.
+        c.push_decimal("60");
+        c.push_decimal("2");
+        c.binary("add");
+        c.set_format(2);
+        assert!(c.state_json().contains("\"lastOp\":null"));
+    }
+
+    /// Neighbours bound the value on both sides, except at the ends of the range.
+    #[test]
+    fn neighbours_are_reported() {
+        let mut c = Calc::new();
+        c.set_format(0);
+        c.push_decimal("1");
+        let s = c.state_json();
+        assert!(s.contains("\"gapBelow\":\"0.0625\""), "{s}");
+        assert!(s.contains("\"gapAbove\":\"0.125\""), "{s}");
+
+        // maxpos has nothing above it.
+        c.clear();
+        c.push_bits("0x7f");
+        let s = c.state_json();
+        assert!(s.contains("\"next\":null"), "{s}");
+        assert!(s.contains("\"gapAbove\":null"), "{s}");
     }
 
     /// Switching format must preserve values, not bit patterns.

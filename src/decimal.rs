@@ -27,11 +27,20 @@ pub fn exact_sci(frac: u64, s: i64) -> Sci {
         s
     };
 
-    let d = n.to_decimal();
-    let trimmed = d.trim_end_matches('0');
-    let trimmed = if trimmed.is_empty() { "0" } else { trimmed };
-    let removed = (d.len() - trimmed.len()) as i64;
+    sci_from(n.to_decimal(), e10)
+}
 
+/// Normalise `digits × 10^e10` into scientific form, dropping trailing zeros.
+pub fn sci_from(digits: String, e10: i64) -> Sci {
+    let trimmed = digits.trim_end_matches('0');
+    if trimmed.is_empty() {
+        // The digits were all zeros, so the value is zero whatever the exponent says.
+        return Sci {
+            digits: "0".to_string(),
+            exp: 0,
+        };
+    }
+    let removed = (digits.len() - trimmed.len()) as i64;
     Sci {
         digits: trimmed.to_string(),
         exp: (e10 + removed + trimmed.len() as i64 - 1) as i32,
@@ -49,6 +58,7 @@ fn round_digits(digits: &str, max_sig: usize) -> (String, i32) {
     let bytes = digits.as_bytes();
     let round_up = bytes[max_sig] >= b'5';
     let mut kept: Vec<u8> = bytes[..max_sig].to_vec();
+    let mut shift = 0i32;
     if round_up {
         let mut i = max_sig;
         loop {
@@ -56,7 +66,8 @@ fn round_digits(digits: &str, max_sig: usize) -> (String, i32) {
                 // Carried off the front: 999… became 1000…
                 kept.insert(0, b'1');
                 kept.pop();
-                return (String::from_utf8(kept).unwrap(), 1);
+                shift = 1;
+                break;
             }
             i -= 1;
             if kept[i] == b'9' {
@@ -67,10 +78,12 @@ fn round_digits(digits: &str, max_sig: usize) -> (String, i32) {
             }
         }
     }
+    // `Sci::digits` never carries trailing zeros, so the carry path must strip them too — leaving
+    // them made a rounded 0.0999… print as "0.100000000000" while an equal value printed "0.1".
     let s = String::from_utf8(kept).unwrap();
     let trimmed = s.trim_end_matches('0');
     let trimmed = if trimmed.is_empty() { "0" } else { trimmed };
-    (trimmed.to_string(), 0)
+    (trimmed.to_string(), shift)
 }
 
 /// Lay out `digits × 10^exp` in positional notation, without an exponent suffix.
@@ -162,8 +175,9 @@ mod tests {
 
     #[test]
     fn rounding_carries() {
+        // Carrying off the front bumps the exponent; the trailing zero is not significant.
         let (d, shift) = round_digits("999", 2);
-        assert_eq!((d.as_str(), shift), ("10", 1));
+        assert_eq!((d.as_str(), shift), ("1", 1));
         let (d, shift) = round_digits("123456", 3);
         assert_eq!((d.as_str(), shift), ("123", 0));
         let (d, shift) = round_digits("125", 2);

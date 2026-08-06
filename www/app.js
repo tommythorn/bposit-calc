@@ -175,7 +175,93 @@ function renderStack(stack) {
   $('stack').innerHTML = html;
 }
 
-function renderAnatomy(entryData, fmt) {
+/**
+ * Parity of an encoding, which is what decides a tie: the pattern ending in 0 wins.
+ */
+const parity = (bits) => (bits.endsWith('1') ? 'odd' : 'even');
+
+/**
+ * What the last operation produced before rounding, and where it landed.
+ *
+ * The bar is the interval between the two representable values that bracket the exact result;
+ * the tick at the centre is the tie point, which is where the even-encoding rule takes over from
+ * "round to the nearer one".
+ */
+function renderRounding(last) {
+  if (!last) return '';
+
+  let h = `<div class="rounding"><h2>Rounding</h2>
+    <div class="roundrow"><span class="rk">asked</span><span class="rv mono">${esc(
+      last.expr
+    )}</span></div>
+    <div class="roundrow"><span class="rk">exact</span><span class="rv mono">${
+      last.exactShown ? '' : '&approx; '
+    }${esc(last.exact)}${last.terminating ? '' : '&hellip;'}</span></div>`;
+
+  if (!last.wasRounded) {
+    h += `<div class="verdict">Exactly representable &mdash; nothing was lost.</div></div>`;
+    return h;
+  }
+
+  h += `<div class="roundrow"><span class="rk">stored</span><span class="rv mono">${esc(
+    last.rounded
+  )}</span></div>`;
+
+  if (last.saturated) {
+    h += `<div class="verdict differs">Past the end of the format's range, so it saturated to the
+      extreme value. Posits have no infinity to overflow to.</div>`;
+  } else {
+    const frac = parseFloat(last.position);
+    const pct = Math.round(frac * 1000) / 10;
+    h += `<div class="ulpbar" style="--p:${(frac * 100).toFixed(4)}%">
+        <div class="tick" title="tie point"></div><div class="mark"></div>
+      </div>
+      <div class="ulpends mono">
+        <span>${esc(last.lo.decimal)}<br><span class="par">${esc(last.lo.bits)} &middot; ${parity(
+      last.lo.bits
+    )}</span></span>
+        <span>${esc(last.hi.decimal)}<br><span class="par">${esc(last.hi.bits)} &middot; ${parity(
+      last.hi.bits
+    )}</span></span>
+      </div>`;
+    h += last.tie
+      ? `<div class="verdict differs"><b>Exact tie.</b> The result fell precisely halfway between
+         two representable values, so "the nearer one" does not exist. The tie goes to the
+         <b>even encoding</b> &mdash; the ${parity(last.lo.bits) === 'even' ? 'left' : 'right'}
+         one above, whose bit pattern ends in 0. That rule is what keeps repeated rounding from
+         drifting in one direction.</div>`
+      : `<div class="verdict">Landed ${pct}% of the way along, so it rounded to the nearer end.</div>`;
+    h += `<div class="roundrow"><span class="rk">error</span><span class="rv mono">${esc(
+      last.relError
+    )} relative</span></div>`;
+  }
+
+  return h + `</div>`;
+}
+
+/**
+ * The representable values either side of level 1. The gaps are what precision *is*: they grow
+ * with the exponent, and the regime cap is what stops them growing without bound.
+ */
+function renderNeighbours(nb, self) {
+  if (!nb) return '';
+  const row = (label, v, gap, cls) => {
+    if (!v) {
+      return `<div class="nrow ${cls}"><span class="nk">${label}</span>
+        <span class="nv end">none &mdash; end of the range</span><span class="ng"></span></div>`;
+    }
+    return `<div class="nrow ${cls}"><span class="nk">${label}</span>
+      <span class="nv mono">${esc(v.decimal)}</span>
+      <span class="ng mono">${gap ? esc(gap) : ''}</span></div>`;
+  };
+  return `<div class="neighbours"><h2>Neighbouring values</h2>
+    ${row('next', nb.next, nb.gapAbove ? '+' + nb.gapAbove : '', '')}
+    ${row('this', { decimal: self }, '', 'self')}
+    ${row('prior', nb.prior, nb.gapBelow ? '\u2212' + nb.gapBelow : '', '')}
+  </div>`;
+}
+
+function renderAnatomy(entryData, fmt, lastOp, neighbours) {
   const el = $('anatomy');
   if (!entryData) {
     el.innerHTML = `<h2>Anatomy</h2><p class="placeholder">Enter a number to see how it is encoded.</p>`;
@@ -201,6 +287,7 @@ function renderAnatomy(entryData, fmt) {
     </details>`;
   }
 
+  html += renderRounding(lastOp);
   html += bitFieldsHtml(entryData.bits, v);
 
   // A negative posit's fields are defined on its two's complement, so the run of identical bits
@@ -246,6 +333,8 @@ function renderAnatomy(entryData, fmt) {
     </div>`;
   }
 
+  html += renderNeighbours(neighbours, v.decimal);
+
   // The unbounded shadow: same bits, no cap.
   html += `<div class="shadow">
     <h2>Same bits, uncapped regime</h2>
@@ -274,7 +363,7 @@ function render() {
   const state = JSON.parse(calc.stateJson());
   renderFacts(state.format);
   renderStack(state.stack);
-  renderAnatomy(state.stack[0], state.format);
+  renderAnatomy(state.stack[0], state.format, state.lastOp, state.neighbours);
 
   $('entry').textContent = entry;
   $('error').textContent = state.error || '';
