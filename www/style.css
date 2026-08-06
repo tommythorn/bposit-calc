@@ -422,7 +422,8 @@ footer a { color: #8fb8ff; }
 /* ------------------------------------------------------------------ desktop */
 
 @media (min-width: 1000px) {
-  html, body { overflow: auto; }
+  /* With a mouse the page is a document again: let it scroll normally. */
+  html, body { overflow: auto; height: auto; }
 
   .app { height: auto; min-height: 100dvh; max-height: none; }
 
