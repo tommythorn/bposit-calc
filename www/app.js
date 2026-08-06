@@ -60,15 +60,12 @@ function doUnary(op) {
 function doAction(act) {
   switch (act) {
     case 'enter':
-      // Finishing a typed number just ends entry -- the digits are already in X. With nothing
-      // being typed, ENTER duplicates X. Either way the lift is suspended, so the next digit
-      // overwrites X rather than pushing it up.
-      if (entry !== '') {
-        endEntry();
-        calc.endEntry();
-      } else {
-        calc.enterKey();
-      }
+      // ENTER always duplicates X, whether or not digits were being typed. The lift that happens
+      // when you start typing is a separate push, caused by the *previous* operation enabling
+      // lift; ENTER's own push is what puts the copy in Y. So `2 ENTER` leaves 2 in both X and Y,
+      // and the suspended lift makes the next digit overwrite the copy.
+      endEntry();
+      calc.enterKey();
       break;
     case 'chs':
       // While typing, +/- flips the sign of the literal; otherwise it negates level 1.

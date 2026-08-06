@@ -105,19 +105,17 @@ impl Calc {
         self.regs = [self.regs[1], self.regs[2], self.regs[3], 0];
     }
 
-    /// ENTER with nothing being typed: duplicate X and suspend the lift.
+    /// ENTER: duplicate X and suspend the lift.
+    ///
+    /// This is unconditional. Starting to type also lifts, but that push comes from the
+    /// *previous* operation having enabled lift — it is not ENTER's. ENTER pushes on its own
+    /// account, which is why `2 ENTER` leaves 2 in both X and Y, and why the suspended lift then
+    /// makes the next digit overwrite the copy rather than pushing again.
     ///
     /// X is unchanged, so whatever the inspector was saying about it still holds.
     #[wasm_bindgen(js_name = enterKey)]
     pub fn enter_key(&mut self) {
         self.lift_in(self.regs[0]);
-        self.lift = false;
-    }
-
-    /// ENTER used to finish a number that was being typed: the digits already went into X, so
-    /// this only suspends the lift.
-    #[wasm_bindgen(js_name = endEntry)]
-    pub fn end_entry(&mut self) {
         self.lift = false;
     }
 
@@ -704,39 +702,102 @@ mod tests {
         assert_eq!(c.regs, want);
     }
 
+    /// Drive the calculator the way the keypad does, one keystroke at a time.
+    ///
+    /// `type_x` is called per character because that is what the UI does; a test that pushed
+    /// whole values instead would not have caught ENTER failing to duplicate mid-entry.
+    fn keys(c: &mut Calc, seq: &[&str]) {
+        let mut entry = String::new();
+        for k in seq {
+            match *k {
+                "ENTER" => {
+                    entry.clear();
+                    c.enter_key();
+                }
+                "+" | "-" | "*" | "/" => {
+                    entry.clear();
+                    c.binary(match *k {
+                        "+" => "add",
+                        "-" => "sub",
+                        "*" => "mul",
+                        _ => "div",
+                    });
+                }
+                "SWAP" => {
+                    entry.clear();
+                    c.swap();
+                }
+                digits => {
+                    for ch in digits.chars() {
+                        entry.push(ch);
+                        c.type_x(&entry);
+                    }
+                }
+            }
+        }
+    }
+
     /// ENTER duplicates X and suspends the lift, so the next number typed replaces the copy and
     /// leaves the original in Y. This is what makes `2 ENTER 3 x` work.
     #[test]
     fn enter_duplicates_then_the_next_number_overwrites() {
         let mut c = Calc::new();
-        c.type_x("2");
-        c.enter_key();
-        assert_eq!(c.regs[0], c.regs[1], "ENTER duplicates X");
+        keys(&mut c, &["2", "ENTER"]);
+        let two = from_decimal_bits(&c, "2");
+        assert_eq!(c.regs[0], two, "X keeps the value");
+        assert_eq!(c.regs[1], two, "and Y gets a copy");
         assert!(!c.lift, "ENTER suspends the lift");
 
-        c.type_x("3");
+        keys(&mut c, &["3"]);
         assert_eq!(c.regs[0], from_decimal_bits(&c, "3"));
-        assert_eq!(
-            c.regs[1],
-            from_decimal_bits(&c, "2"),
-            "the original stays in Y"
-        );
+        assert_eq!(c.regs[1], two, "the original stays in Y");
 
-        c.binary("mul");
+        keys(&mut c, &["*"]);
         assert_eq!(c.regs[0], from_decimal_bits(&c, "6"));
+    }
+
+    /// The whole point of ENTER duplicating: `2 ENTER +` doubles.
+    #[test]
+    fn enter_then_an_operator_uses_the_copy() {
+        let mut c = Calc::new();
+        keys(&mut c, &["2", "ENTER", "+"]);
+        assert_eq!(c.regs[0], from_decimal_bits(&c, "4"));
+    }
+
+    /// Full keystroke sequences, checked end to end.
+    #[test]
+    fn keystroke_sequences() {
+        let cases: &[(&[&str], &str)] = &[
+            (&["2", "ENTER", "3", "*"], "6"),
+            (&["2", "ENTER", "3", "+"], "5"),
+            (&["10", "ENTER", "4", "-"], "6"),
+            (&["12", "ENTER", "4", "/"], "3"),
+            // Repeated ENTER stacks copies.
+            (&["7", "ENTER", "ENTER", "+"], "14"),
+            // Typing after an operator lifts the result rather than replacing it.
+            (&["2", "ENTER", "3", "+", "4", "*"], "20"),
+            (&["1", "ENTER", "2", "SWAP", "-"], "1"),
+        ];
+        for (seq, want) in cases {
+            let mut c = Calc::new();
+            c.set_format(2);
+            keys(&mut c, seq);
+            assert_eq!(
+                c.regs[0],
+                from_decimal_bits(&c, want),
+                "{seq:?} should give {want}"
+            );
+        }
     }
 
     /// After anything other than ENTER, typing lifts the previous value out of the way.
     #[test]
     fn typing_after_an_operation_lifts() {
         let mut c = Calc::new();
-        c.type_x("2");
-        c.enter_key();
-        c.type_x("3");
-        c.binary("add"); // X = 5, and the lift is re-enabled
+        keys(&mut c, &["2", "ENTER", "3", "+"]); // X = 5, and the lift is re-enabled
         assert!(c.lift);
 
-        c.type_x("4");
+        keys(&mut c, &["4"]);
         assert_eq!(c.regs[0], from_decimal_bits(&c, "4"));
         assert_eq!(
             c.regs[1],
