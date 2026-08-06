@@ -237,7 +237,9 @@ function renderAnatomy(entryData, fmt) {
       1 << fmt.es
     } + ${v.e} = ${v.totalExp}</span></div>
       <div>significand <span class="eq">${esc(v.significand)}</span>
-           (${v.fields.frac} fraction bit${v.fields.frac === 1 ? '' : 's'})</div>
+           (${v.fields.frac} fraction bit${v.fields.frac === 1 ? '' : 's'}${
+      v.fields.frac === fmt.pMin ? ' &mdash; at the guaranteed floor' : ''
+    })</div>
       <div>value <span class="eq">= ${v.neg ? '&minus;' : '+'}${esc(
       v.significand
     )} &times; 2<sup>${v.totalExp}</sup></span></div>
