@@ -1,6 +1,6 @@
 # Bounded Posit RPN Calculator
 
-An HP-48 style RPN calculator for **bounded posits**, running in the browser as WebAssembly.
+An HP-42S style RPN calculator for **bounded posits**, running in the browser as WebAssembly.
 
 **[Live demo →](https://tommythorn.github.io/bposit-calc/)**
 
@@ -65,9 +65,12 @@ The page is a fixed-viewport app rather than a scrolling document, and carries a
 
 ### Using it
 
-A fixed four-register stack in the HP manner — X, Y, Z, T, always all four. Dropping backfills T
-with zero and lifting pushes T off the end, so there is never too little or too much on it and no
-operation can fail. There are no error messages because there is nothing left to go wrong.
+A fixed four-register stack in the HP-42S manner — X, Y, Z, T, always all four. Dropping backfills T
+and lifting pushes T off the end, so there is never too little or too much on it and no operation
+can fail. There are no error messages because there is nothing left to go wrong.
+
+One deliberate deviation from the real machine: a 42S *replicates* T when the stack drops, whereas
+this backfills with zero.
 
 ```
 [ENTER] [x⇄y] [+/−] [E] [⌫]

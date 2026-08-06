@@ -1,4 +1,4 @@
-//! An HP-48 style RPN calculator over bounded posits, exposed to the browser via wasm-bindgen.
+//! An HP-42S style RPN calculator over bounded posits, exposed to the browser via wasm-bindgen.
 //!
 //! The point of the thing is the display rather than the arithmetic: every stack entry is shown
 //! decomposed into its sign / regime / terminator / exponent / fraction fields, alongside what the
@@ -34,9 +34,11 @@ pub struct Calc {
     fmt: Format,
     /// The X, Y, Z, T registers, X first.
     ///
-    /// A fixed four-register stack in the HP manner: dropping backfills T with zero and lifting
-    /// pushes T off the end, so there is never too little or too much on it. No operation can
-    /// fail for want of operands, which is why nothing here reports an error.
+    /// A fixed four-register stack in the HP-42S manner: dropping backfills T and lifting pushes T
+    /// off the end, so there is never too little or too much on it. No operation can fail for want
+    /// of operands, which is why nothing here reports an error.
+    ///
+    /// Unlike a real 42S, which replicates T on a drop, this backfills with zero.
     regs: [u64; 4],
     /// HP's stack-lift flag.
     ///

@@ -2,7 +2,7 @@
 name = "bposit-calc"
 version = "0.1.0"
 edition = "2021"
-description = "An HP-48 style RPN calculator for bounded posits, with a bit-level view of the encoding"
+description = "An HP-42S style RPN calculator for bounded posits, with a bit-level view of the encoding"
 license = "LGPL-3.0"
 
 [lib]
