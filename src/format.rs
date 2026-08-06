@@ -415,6 +415,8 @@ pub fn from_decimal(fmt: Format, s: &str) -> Option<u64> {
     let mut mantissa = Big::from_u64(0);
     let mut seen_digit = false;
     let mut seen_point = false;
+    // Digits from the first nonzero onwards, so `mantissa` has exactly this many digits.
+    let mut sig_digits: i64 = 0;
     for c in num.chars() {
         match c {
             '.' => {
@@ -427,6 +429,9 @@ pub fn from_decimal(fmt: Format, s: &str) -> Option<u64> {
                 seen_digit = true;
                 mantissa.mul_u32(10);
                 mantissa.add_u32(c as u32 - '0' as u32);
+                if !mantissa.is_zero() {
+                    sig_digits += 1;
+                }
                 if seen_point {
                     exp10 -= 1;
                 }
@@ -443,13 +448,28 @@ pub fn from_decimal(fmt: Format, s: &str) -> Option<u64> {
         return Some(0);
     }
 
+    let signed = |bits: u64| {
+        Some(if neg {
+            bits.wrapping_neg() & fmt.mask()
+        } else {
+            bits
+        })
+    };
+
+    // Saturate absurd magnitudes before touching a big integer. Rounding needs `5^|exp10|`, which
+    // grows fast enough that `1e999999` would otherwise lock up the tab computing a number that
+    // was never going to land anywhere but maxpos. Every format's range sits inside 1e±97, so a
+    // decimal order of magnitude past ±200 is unambiguous.
+    let order = exp10 as i64 + sig_digits - 1;
+    if order > 200 {
+        return signed(fmt.max_bits());
+    }
+    if order < -200 {
+        return signed(fmt.min_positive_bits());
+    }
+
     let target = DecimalTarget { mantissa, exp10 };
-    let out = round_positive(fmt, &target);
-    Some(if neg {
-        out.wrapping_neg() & fmt.mask()
-    } else {
-        out
-    })
+    signed(round_positive(fmt, &target))
 }
 
 #[cfg(test)]
@@ -662,6 +682,48 @@ mod tests {
                 );
             }
         }
+    }
+
+    /// The magnitude shortcut must agree with the full comparison either side of the cutoff, and
+    /// must not cost anything for inputs a person would plausibly type.
+    #[test]
+    fn absurd_magnitudes_saturate_without_big_integer_work() {
+        for fmt in Format::ALL {
+            // Far outside any format's range: saturate, keeping the sign.
+            assert_eq!(from_decimal(fmt, "1e999999"), Some(fmt.max_bits()));
+            assert_eq!(
+                from_decimal(fmt, "-1e999999"),
+                Some(fmt.max_bits().wrapping_neg() & fmt.mask())
+            );
+            assert_eq!(
+                from_decimal(fmt, "1e-999999"),
+                Some(fmt.min_positive_bits())
+            );
+
+            // Leading zeros must not be mistaken for magnitude: this is just 1.
+            let one = from_decimal(fmt, "1").unwrap();
+            let padded = "0".repeat(400) + "1";
+            assert_eq!(from_decimal(fmt, &padded), Some(one), "{:?}", fmt);
+
+            // A long literal that lands inside the range still rounds properly rather than
+            // tripping the shortcut.
+            let long = format!("0.{}5", "0".repeat(300));
+            assert_eq!(
+                from_decimal(fmt, &long),
+                Some(fmt.min_positive_bits()),
+                "{:?}",
+                fmt
+            );
+        }
+        // Either side of the cutoff, saturation is what the full path would have produced anyway.
+        assert_eq!(
+            from_decimal(Format::B64, "1e200"),
+            Some(Format::B64.max_bits())
+        );
+        assert_eq!(
+            from_decimal(Format::B64, "1e201"),
+            Some(Format::B64.max_bits())
+        );
     }
 
     /// Nothing nonzero may round to zero or to NaR — posits saturate instead.
