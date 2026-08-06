@@ -42,10 +42,21 @@ body {
 }
 
 /* Numbers are worth copying; chrome is not. */
-.val, .headline, .decomp, .bits, .entry, .exactline { -webkit-user-select: text; user-select: text; }
+.val, .headline, .decomp, .bits, .exactline { -webkit-user-select: text; user-select: text; }
 
-.mono, .bits, .entry, code, kbd {
+/* Every numeric readout is monospaced with tabular figures. The stack is right-aligned, so a
+   proportional font would leave the columns ragged — digits have to line up. */
+.mono,
+.bits,
+.level .val,
+.anatomy .headline,
+.facts b,
+.decomp .eq,
+.keys button[data-k],
+code,
+kbd {
   font-family: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+  font-variant-numeric: tabular-nums;
 }
 
 button { touch-action: manipulation; font-family: inherit; }
