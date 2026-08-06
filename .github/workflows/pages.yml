@@ -1,0 +1,78 @@
+name: Pages
+
+# Builds the wasm module and publishes www/ as the GitHub Pages site.
+#
+# The build output (www/pkg) is deliberately not tracked: a checked-in artifact only refreshes
+# when someone remembers to rebuild and commit, and silently drifts behind main in the meantime.
+# Building here keeps the live page in step automatically.
+#
+# Requires the repository's Pages source to be "GitHub Actions" (build_type "workflow").
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+# Let a running deploy finish rather than cancelling it half-published.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Add wasm target
+        run: rustup target add wasm32-unknown-unknown
+
+      # wasm-pack fetches its own matching wasm-bindgen and wasm-opt into ~/.cache/.wasm-pack,
+      # so caching both turns the install into a no-op on repeat runs.
+      - name: Cache wasm toolchain
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/wasm-pack
+            ~/.cache/.wasm-pack
+          key: wasm-tools-${{ runner.os }}-v1
+
+      - name: Install wasm-pack
+        run: command -v wasm-pack >/dev/null 2>&1 || cargo install wasm-pack --locked
+
+      - name: Build
+        run: ./build.sh
+
+      - name: Assemble site
+        run: |
+          mkdir -p _site
+          cp -r www/. _site/
+          du -sh _site
+          test -f _site/pkg/bposit_calc_bg.wasm
+
+      - name: Upload Pages artifact
+        if: github.event_name == 'push'
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  # Pull requests build only: deploying from a PR would publish unreviewed code, and forks do not
+  # get the write permissions anyway.
+  deploy:
+    if: github.event_name == 'push'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -1,0 +1,33 @@
+name: Rust
+
+# The test suite is the reason to trust anything this calculator displays: it checks our bit-field
+# decoder against fast-posit's arithmetic exhaustively over the 8- and 16-bit spaces, and checks
+# exact decimal rounding against fast-posit's own conversion.
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Toolchain
+        run: rustup component add rustfmt clippy
+
+      - name: Format
+        run: cargo fmt --check
+
+      - name: Clippy
+        run: cargo clippy --all-targets -- -D warnings
+
+      # Release mode: the exhaustive sweeps are far too slow unoptimised.
+      - name: Test
+        run: cargo test --release

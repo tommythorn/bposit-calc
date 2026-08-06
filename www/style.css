@@ -1,0 +1,448 @@
+:root {
+  --bg: #12151c;
+  --panel: #1a1f2a;
+  --panel-2: #212836;
+  --lcd: #0d1510;
+  --ink: #d7dee9;
+  --dim: #8892a4;
+  --line: #2c3444;
+
+  /* Field colours, following the reference printbits scheme. */
+  --c-sign: #ff6b6b;
+  --c-regime: #ffd166;
+  --c-term: #ff9f45;
+  --c-exp: #e879f9;
+  --c-frac: #5ee6a8;
+  --c-none: #6b7688;
+
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  --safe-l: env(safe-area-inset-left, 0px);
+  --safe-r: env(safe-area-inset-right, 0px);
+  --safe-t: env(safe-area-inset-top, 0px);
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
+body {
+  background: var(--bg);
+  color: var(--ink);
+  font: 14px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif;
+  /* A stray text selection from a mistimed tap looks like a bug on a calculator. */
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+  -webkit-text-size-adjust: 100%;
+}
+
+/* Numbers are worth copying; chrome is not. */
+.val, .headline, .decomp, .bits, .entry, .exactline { -webkit-user-select: text; user-select: text; }
+
+.mono, .bits, .entry, code, kbd {
+  font-family: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+}
+
+button { touch-action: manipulation; font-family: inherit; }
+
+/* ------------------------------------------------------------------- shell */
+
+/* The app fills the viewport exactly and never scrolls as a whole; only the
+   anatomy pane scrolls. 100dvh rather than 100vh so the iOS URL bar
+   collapsing does not leave the keypad off-screen. */
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  max-height: 100dvh;
+  padding: var(--safe-t) var(--safe-r) 0 var(--safe-l);
+  overflow: hidden;
+}
+
+.topbar, .facts, footer { flex: none; }
+
+main {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0.5rem 0.6rem 0;
+  overflow: hidden;
+}
+
+.display { flex: none; }
+.anatomy { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.keypad  { flex: none; }
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.7rem;
+  min-width: 0;
+}
+
+/* ------------------------------------------------------------------ top bar */
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  padding: 0.55rem 0.7rem;
+  border-bottom: 1px solid var(--line);
+  background: var(--panel);
+}
+
+.topbar h1 {
+  margin: 0;
+  font-size: 0.95rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.topbar .rpn { color: var(--c-frac); font-weight: 700; }
+
+.formats { display: flex; gap: 0.3rem; }
+
+.formats button {
+  background: var(--panel-2);
+  color: var(--dim);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 0.35rem 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.formats button[aria-pressed="true"] {
+  background: #303b52;
+  color: #fff;
+  border-color: #4d5c7a;
+}
+
+/* -------------------------------------------------------------------- facts */
+
+.facts {
+  display: flex;
+  gap: 1.1rem;
+  padding: 0.45rem 0.7rem;
+  font-size: 0.72rem;
+  color: var(--dim);
+  border-bottom: 1px solid var(--line);
+  background: #161b24;
+  overflow-x: auto;
+  white-space: nowrap;
+  scrollbar-width: none;
+}
+
+.facts::-webkit-scrollbar { display: none; }
+.facts b { color: var(--ink); font-weight: 600; }
+
+/* -------------------------------------------------------------------- stack */
+
+.display { background: var(--lcd); }
+
+.stack { display: flex; flex-direction: column; gap: 0.15rem; }
+
+.level {
+  display: grid;
+  grid-template-columns: 1.6rem minmax(0, 1fr);
+  gap: 0.4rem;
+  align-items: baseline;
+  padding: 0.15rem 0;
+  border-bottom: 1px dashed #1d2a22;
+}
+
+.level .tag { color: #4f6b58; font-size: 0.7rem; font-weight: 600; }
+
+.level .val {
+  color: #8ff0b5;
+  font-size: 0.95rem;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.level .val.approx::before { content: "\2248 "; color: #4f6b58; }
+
+.level .rowbits {
+  grid-column: 2;
+  text-align: right;
+  letter-spacing: 0.04em;
+  font-size: 0.66rem;
+  overflow-wrap: anywhere;
+}
+
+.level.empty .val { color: #35493c; }
+
+.entryline {
+  margin-top: 0.45rem;
+  padding-top: 0.4rem;
+  border-top: 1px solid #1d2a22;
+  color: #8ff0b5;
+  font-size: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.entryline .prompt { color: #4f6b58; }
+.entry { flex: 1; overflow-wrap: anywhere; }
+
+.caret {
+  width: 0.5rem;
+  height: 1rem;
+  background: #8ff0b5;
+  animation: blink 1.1s step-end infinite;
+}
+
+@keyframes blink { 50% { opacity: 0; } }
+
+.error { margin-top: 0.35rem; min-height: 1rem; color: #ff8f8f; font-size: 0.75rem; }
+
+/* ------------------------------------------------------------------ anatomy */
+
+.anatomy h2 {
+  margin: 0 0 0.15rem;
+  font-size: 0.72rem;
+  font-weight: 600;
+  color: var(--dim);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.anatomy .headline {
+  font-size: 1.2rem;
+  color: #8ff0b5;
+  overflow-wrap: anywhere;
+}
+
+.anatomy .sub { color: var(--dim); font-size: 0.72rem; margin-bottom: 0.7rem; }
+
+.scroller {
+  overflow-x: auto;
+  overscroll-behavior-x: contain;
+  padding-bottom: 0.25rem;
+}
+
+.bitfields { display: flex; align-items: stretch; min-width: min-content; }
+
+.fieldgroup {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 0 0.16rem;
+  border-bottom: 2px solid currentColor;
+}
+
+.fieldgroup .bits {
+  font-size: 0.95rem;
+  letter-spacing: 0.1em;
+  white-space: pre;
+  padding-bottom: 0.12rem;
+}
+
+.fieldgroup .label {
+  font-size: 0.62rem;
+  white-space: nowrap;
+  padding-top: 0.18rem;
+}
+
+.f-sign   { color: var(--c-sign); }
+.f-regime { color: var(--c-regime); }
+.f-term   { color: var(--c-term); }
+.f-exp    { color: var(--c-exp); }
+.f-frac   { color: var(--c-frac); }
+.f-none   { color: var(--c-none); }
+
+/* The terminator slot that a capped regime swallows. */
+.fieldgroup.ghost { color: var(--c-term); border-bottom-style: dashed; opacity: 0.75; }
+
+.fieldgroup.ghost .bits {
+  color: transparent;
+  border: 1px dashed var(--c-term);
+  border-radius: 3px;
+  position: relative;
+}
+
+.fieldgroup.ghost .bits::after {
+  content: "\00D7";
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: var(--c-term);
+  font-size: 0.8rem;
+}
+
+.capnote {
+  margin: 0.6rem 0 0;
+  padding: 0.45rem 0.6rem;
+  border-left: 3px solid var(--c-term);
+  background: rgba(255, 159, 69, 0.09);
+  border-radius: 0 5px 5px 0;
+  font-size: 0.75rem;
+  color: #ffd3ab;
+}
+
+.capnote.inactive {
+  border-left-color: var(--line);
+  background: rgba(255, 255, 255, 0.025);
+  color: var(--dim);
+}
+
+.capnote code { color: var(--ink); }
+
+.decomp {
+  margin-top: 0.7rem;
+  font-size: 0.78rem;
+  color: var(--dim);
+  line-height: 1.85;
+  overflow-wrap: anywhere;
+}
+
+.decomp .eq { color: var(--ink); }
+
+.shadow { margin-top: 0.9rem; padding-top: 0.7rem; border-top: 1px solid var(--line); }
+
+.shadow .verdict {
+  margin-top: 0.5rem;
+  font-size: 0.75rem;
+  padding: 0.45rem 0.6rem;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.03);
+  color: var(--dim);
+}
+
+.shadow .verdict.differs { color: #ffd3ab; background: rgba(255, 159, 69, 0.09); }
+.shadow .verdict b { color: var(--ink); }
+
+.placeholder { color: var(--dim); font-size: 0.8rem; padding: 1.2rem 0; text-align: center; }
+
+details.exact { margin: -0.35rem 0 0.7rem; }
+
+details.exact summary {
+  cursor: pointer;
+  color: var(--dim);
+  font-size: 0.72rem;
+  list-style-position: outside;
+}
+
+details.exact .exactline {
+  margin-top: 0.35rem;
+  padding: 0.45rem 0.6rem;
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 5px;
+  font-size: 0.7rem;
+  color: var(--ink);
+  overflow-wrap: anywhere;
+  max-height: 9rem;
+  overflow-y: auto;
+}
+
+/* ------------------------------------------------------------------- keypad */
+
+.keys {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 0.35rem;
+}
+
+.keys button {
+  background: var(--panel-2);
+  color: var(--ink);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  /* Comfortably past the 44px touch target minimum. */
+  min-height: 46px;
+  padding: 0.2rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.keys button:active { background: #2a3244; transform: translateY(1px); }
+.keys button.op { color: var(--c-exp); }
+.keys button.enter { color: var(--c-frac); }
+.keys button.danger { color: var(--c-sign); }
+.keys button.wide { grid-column: span 2; }
+
+@media (hover: hover) {
+  .keys button:hover { background: #2a3244; }
+  .formats button:hover { color: var(--ink); border-color: #3d4759; }
+}
+
+.hint { margin: 0.7rem 0 0; font-size: 0.7rem; color: var(--dim); line-height: 1.7; }
+
+kbd {
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  padding: 0.05rem 0.28rem;
+  font-size: 0.9em;
+}
+
+code { color: var(--c-frac); }
+
+/* ------------------------------------------------------------------- footer */
+
+footer {
+  padding: 0.4rem 0.7rem calc(0.4rem + var(--safe-b));
+  border-top: 1px solid var(--line);
+  color: var(--dim);
+  font-size: 0.66rem;
+  line-height: 1.5;
+  text-align: center;
+}
+
+footer a { color: #8fb8ff; }
+
+/* -------------------------------------------------------------- small screens */
+
+/* On a phone the keyboard hint is dead weight — there is no keyboard. */
+@media (max-width: 700px) {
+  .hint { display: none; }
+  .keypad { padding: 0.5rem; }
+  main { padding: 0.4rem 0.45rem 0; gap: 0.4rem; }
+}
+
+/* Short viewports: give the keypad and stack the room, trim everything else. */
+@media (max-height: 700px) {
+  .level .rowbits { display: none; }
+  .keys button { min-height: 42px; }
+}
+
+/* ------------------------------------------------------------------ desktop */
+
+@media (min-width: 1000px) {
+  html, body { overflow: auto; }
+
+  .app { height: auto; min-height: 100dvh; max-height: none; }
+
+  main {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-areas: "display anatomy" "keypad anatomy";
+    align-items: start;
+    gap: 0.8rem;
+    padding: 0.8rem 1rem;
+    overflow: visible;
+  }
+
+  .display { grid-area: display; }
+  .keypad  { grid-area: keypad; }
+  .anatomy { grid-area: anatomy; overflow-y: visible; }
+
+  .topbar { padding: 0.75rem 1rem; }
+  .topbar h1 { font-size: 1.05rem; }
+  .facts { padding: 0.5rem 1rem; font-size: 0.75rem; }
+  footer { text-align: left; padding: 0.7rem 1rem; font-size: 0.72rem; }
+  .anatomy .headline { font-size: 1.35rem; }
+}

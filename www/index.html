@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<!-- Fixed scale: this is a calculator, so pinch-zoom and double-tap-zoom are misfires, not intent. -->
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#12151c">
+<meta name="description" content="An RPN calculator over bounded posits that shows the bit-level structure of every value.">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="BPosit RPN">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/icon-180.png">
+<link rel="icon" href="icons/icon-192.png" type="image/png">
+<title>Bounded Posit RPN Calculator</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<div class="app">
+
+  <header class="topbar">
+    <h1>Bounded Posit <span class="rpn">RPN</span></h1>
+    <div class="formats" id="formats" role="group" aria-label="Number format"></div>
+  </header>
+
+  <div class="facts" id="facts"></div>
+
+  <main>
+    <section class="panel display">
+      <div class="stack" id="stack"></div>
+      <div class="entryline">
+        <span class="prompt">&gt;</span><span class="entry" id="entry"></span><span class="caret"></span>
+      </div>
+      <div class="error" id="error"></div>
+    </section>
+
+    <section class="panel anatomy" id="anatomy"></section>
+
+    <section class="panel keypad">
+      <div class="keys" id="keys">
+        <button data-k="7">7</button><button data-k="8">8</button><button data-k="9">9</button>
+        <button data-op="div" class="op">&divide;</button><button data-un="recip" class="op">1/x</button>
+
+        <button data-k="4">4</button><button data-k="5">5</button><button data-k="6">6</button>
+        <button data-op="mul" class="op">&times;</button><button data-un="double" class="op">x&middot;2</button>
+
+        <button data-k="1">1</button><button data-k="2">2</button><button data-k="3">3</button>
+        <button data-op="sub" class="op">&minus;</button><button data-un="half" class="op">x/2</button>
+
+        <button data-k="0">0</button><button data-k=".">.</button><button data-k="e">e</button>
+        <button data-op="add" class="op">+</button><button data-act="chs" class="op">+/&minus;</button>
+
+        <button data-act="enter" class="wide enter">ENTER</button>
+        <button data-act="swap">SWAP</button>
+        <button data-act="dup">DUP</button>
+        <button data-act="back">&#9003;</button>
+        <button data-act="clear" class="danger">CLR</button>
+      </div>
+      <p class="hint">
+        Keyboard: digits, <kbd>.</kbd> <kbd>e</kbd>, <kbd>+</kbd> <kbd>-</kbd> <kbd>*</kbd> <kbd>/</kbd>,
+        <kbd>Enter</kbd>, <kbd>Backspace</kbd> (drops when not typing), <kbd>n</kbd> negate,
+        <kbd>r</kbd> reciprocal, <kbd>d</kbd> double, <kbd>h</kbd> halve, <kbd>s</kbd> swap,
+        <kbd>Esc</kbd> clear. <kbd>-</kbd> is always subtract; use <kbd>n</kbd> to change sign.
+        Type <code>0x7f</code> or <code>0b0110</code> to enter a raw bit pattern.
+      </p>
+    </section>
+  </main>
+
+  <footer>
+    Arithmetic by <a href="https://crates.io/crates/fast-posit">fast-posit</a> (LGPL-3.0).
+    Parameters follow <a href="https://github.com/jamesquinlan/BPosits.jl">BPosits.jl</a>.
+    <a href="https://github.com/tommythorn/bposit-calc">Source</a>.
+  </footer>
+
+</div>
+
+<script type="module" src="app.js"></script>
+</body>
+</html>
