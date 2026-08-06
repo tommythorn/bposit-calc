@@ -185,10 +185,9 @@ function renderStack(stack) {
     // While typing, X shows the digits as entered rather than the value they rounded to --
     // otherwise typing "0.1" in BPosit8 would replace itself with 0.099609375 mid-keystroke.
     const typing = lvl === 1 && entry !== '';
-    const shown = typing
-      ? `${esc(entry)}<span class="caret"></span>`
-      : `${esc(v.decimal)}`;
-    html += `<div class="level${typing ? ' typing' : ''}">
+    // No cursor: the HP-48 does not have one, and the digits themselves show what is going on.
+    const shown = typing ? esc(entry) : esc(v.decimal);
+    html += `<div class="level">
       <span class="tag">${lvl}:</span>
       <span class="val${!typing && !v.decimalExact ? ' approx' : ''}">${shown}</span>
       <span class="rowbits mono">${bitRowHtml(e.bits, v)}</span>
