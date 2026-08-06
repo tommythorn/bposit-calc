@@ -377,7 +377,7 @@ function lockViewport() {
   for (const ev of ['gesturestart', 'gesturechange', 'gestureend']) {
     document.addEventListener(ev, (e) => e.preventDefault(), { passive: false });
   }
-  // Rubber-band scrolling on the shell itself; the anatomy pane still scrolls normally.
+  // Suppress rubber-band scrolling of the shell itself; the anatomy pane still scrolls normally.
   document.body.addEventListener(
     'touchmove',
     (e) => {
@@ -398,4 +398,9 @@ async function main() {
   render();
 }
 
-main();
+// A failed wasm fetch would otherwise leave a blank shell with the reason only in the console.
+main().catch((err) => {
+  console.error(err);
+  $('anatomy').innerHTML = `<h2>Failed to start</h2>
+    <p class="placeholder">The WebAssembly module did not load.<br>${esc(String(err))}</p>`;
+});
