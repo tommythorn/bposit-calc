@@ -806,6 +806,51 @@ mod tests {
         }
     }
 
+    /// Ties round to the *even encoding*, which makes arithmetic non-invertible in a way that
+    /// reads as a bug until you see the grid.
+    ///
+    /// BPosit8 is representable at ..56, 60, 64, 72.. so 62 is exactly halfway between 60 and 64.
+    /// Both `60 + 2` and `64 - 2` produce that same tie, and both resolve to 64 because 64's
+    /// encoding (112) is even where 60's (111) is odd.
+    ///
+    /// This is not an upward bias: 58 is the tie between 56 (even) and 60 (odd), so `56 + 2`
+    /// rounds *down*. Checked against both the arithmetic and the independent decimal rounder,
+    /// which share no code.
+    #[test]
+    fn ties_round_to_the_even_encoding() {
+        let fmt = Format::B8;
+        let d = |s: &str| from_decimal(fmt, s).unwrap();
+        let add = |a, b| bin_op(fmt, BinOp::Add, a, b);
+        let sub = |a, b| bin_op(fmt, BinOp::Sub, a, b);
+
+        // The grid really does step 4 below 64 and 8 above it, so 62 and 58 are exact midpoints.
+        for (lit, want) in [("56", 56.0), ("60", 60.0), ("64", 64.0), ("72", 72.0)] {
+            assert_eq!(
+                to_f64(fmt, d(lit)),
+                want,
+                "{lit} should be exactly representable"
+            );
+        }
+        assert_eq!(d("60") & 1, 1, "60 must have an odd encoding");
+        assert_eq!(d("64") & 1, 0, "64 must have an even encoding");
+        assert_eq!(d("56") & 1, 0, "56 must have an even encoding");
+
+        // Same tie reached from both directions, same answer.
+        assert_eq!(to_f64(fmt, add(d("60"), d("2"))), 64.0);
+        assert_eq!(to_f64(fmt, sub(d("64"), d("2"))), 64.0);
+
+        // The tie-break follows the encoding, not the direction of travel.
+        assert_eq!(to_f64(fmt, add(d("56"), d("2"))), 56.0);
+
+        // Non-ties still go to the genuinely nearer neighbour.
+        assert_eq!(to_f64(fmt, add(d("60"), d("1"))), 60.0);
+        assert_eq!(to_f64(fmt, add(d("60"), d("3"))), 64.0);
+
+        // The independent decimal rounder must break the same ties the same way.
+        assert_eq!(d("62"), d("64"));
+        assert_eq!(d("58"), d("56"));
+    }
+
     /// In BPosit8 every pattern carries exactly 3 fraction bits, so doubling is exact right up to
     /// the point it saturates. This is the uniform-precision property the cap buys.
     #[test]
