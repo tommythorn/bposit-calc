@@ -87,7 +87,8 @@ verifies, among other things:
   spaces, and over 200k random 32-bit patterns;
 - that `fast-posit`'s `RS` (max regime *bits*) equals the reference's `k_max + 1` (max regime
   *value*), which is the one place the two parameterisations could have been mismatched;
-- exact decimal rounding against `fast-posit`'s own `f64` conversion, over ~9000 values per format;
+- exact decimal rounding against `fast-posit`'s own `f64` conversion, over ~3000 values in each of
+  BPosit8/16/32;
 - an exhaustive 16-bit decimal round-trip, and a BPosit64 round-trip through expansions hundreds of
   digits long;
 - that bit patterns are monotonically ordered by value, which the encoder's binary search relies on;

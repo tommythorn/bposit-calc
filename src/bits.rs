@@ -2,7 +2,7 @@
 //!
 //! This mirrors `_bitfields` in the reference implementation
 //! (<https://github.com/jamesquinlan/BPosits.jl>) and is checked exhaustively against
-//! `fast-posit`'s arithmetic in `tests/`.
+//! `fast-posit`'s arithmetic in this module's tests.
 //!
 //! The layout of a b-posit, reading left to right, is
 //!

@@ -6,7 +6,7 @@
 //!
 //! `fast-posit` parameterises the cap as `RS`, the maximum number of *regime bits*, whereas the
 //! reference uses `k_max`, the maximum regime *value*. The two are related by `RS = k_max + 1`,
-//! which `tests/conformance.rs` checks exhaustively.
+//! which the tests at the bottom of this module pin down rather than assume.
 
 use crate::bignum::Big;
 use crate::bits::{decode, mask_n, Fields, Special, HIDDEN_BIT};
