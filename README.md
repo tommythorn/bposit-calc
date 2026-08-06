@@ -65,12 +65,12 @@ The page is a fixed-viewport app rather than a scrolling document, and carries a
 
 ### Using it
 
-A fixed four-register stack in the HP-42S manner — X, Y, Z, T, always all four. Dropping backfills T
-and lifting pushes T off the end, so there is never too little or too much on it and no operation
-can fail. There are no error messages because there is nothing left to go wrong.
+A fixed four-register stack in the HP-42S manner — X, Y, Z, T, always all four. Dropping
+*replicates* T and lifting pushes T off the end, so there is never too little or too much on it and
+no operation can fail. There are no error messages because there is nothing left to go wrong.
 
-One deliberate deviation from the real machine: a 42S *replicates* T when the stack drops, whereas
-this backfills with zero.
+T replicating is not a quirk to tolerate but a feature to use: load a constant into T and every
+drop refills Z with it, so `2 ENTER ENTER ENTER × × ×` keeps finding a 2 to multiply by.
 
 ```
 [ENTER] [x⇄y] [+/−] [E] [⌫]

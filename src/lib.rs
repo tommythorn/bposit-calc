@@ -34,11 +34,9 @@ pub struct Calc {
     fmt: Format,
     /// The X, Y, Z, T registers, X first.
     ///
-    /// A fixed four-register stack in the HP-42S manner: dropping backfills T and lifting pushes T
-    /// off the end, so there is never too little or too much on it. No operation can fail for want
-    /// of operands, which is why nothing here reports an error.
-    ///
-    /// Unlike a real 42S, which replicates T on a drop, this backfills with zero.
+    /// A fixed four-register stack in the HP-42S manner: dropping replicates T and lifting pushes
+    /// T off the end, so there is never too little or too much on it. No operation can fail for
+    /// want of operands, which is why nothing here reports an error.
     regs: [u64; 4],
     /// HP's stack-lift flag.
     ///
@@ -102,9 +100,12 @@ impl Calc {
         self.lift = true;
     }
 
-    /// Drop the stack: Y becomes X and T is backfilled with zero.
+    /// Drop the stack: Y becomes X and T *replicates* rather than emptying.
+    ///
+    /// The replication is not a detail. It is what lets T hold a constant across a run of
+    /// operations: load it once, and every drop refills Z with it again.
     fn drop_stack(&mut self) {
-        self.regs = [self.regs[1], self.regs[2], self.regs[3], 0];
+        self.regs = [self.regs[1], self.regs[2], self.regs[3], self.regs[3]];
     }
 
     /// ENTER: duplicate X and suspend the lift.
@@ -264,7 +265,7 @@ impl Calc {
         });
     }
 
-    /// Drop X; T backfills with zero.
+    /// Drop X; T replicates.
     #[wasm_bindgen(js_name = dropX)]
     pub fn drop_x(&mut self) {
         self.drop_stack();
@@ -670,11 +671,55 @@ mod tests {
         let want = ["5", "4", "3", "2"].map(|v| from_decimal_bits(&c, v));
         assert_eq!(c.regs, want);
 
-        // Dropping backfills T with zero rather than running out.
-        for _ in 0..4 {
+        // Dropping replicates T rather than running out, so the last value persists.
+        let two = from_decimal_bits(&c, "2");
+        for _ in 0..6 {
             c.drop_x();
         }
-        assert_eq!(c.regs, [0; 4]);
+        assert_eq!(c.regs, [two; 4], "T replicates down the whole stack");
+    }
+
+    /// T replicating on a drop is what makes it usable as a constant register: load it once and
+    /// every subsequent drop refills Z with it again.
+    #[test]
+    fn t_replicates_on_drop() {
+        let mut c = Calc::new();
+        c.set_format(2);
+        for v in ["9", "3", "2", "1"] {
+            c.push_decimal(v);
+        }
+        // X=1, Y=2, Z=3, T=9
+        let (one, two, three, nine) = (
+            from_decimal_bits(&c, "1"),
+            from_decimal_bits(&c, "2"),
+            from_decimal_bits(&c, "3"),
+            from_decimal_bits(&c, "9"),
+        );
+        assert_eq!(c.regs, [one, two, three, nine]);
+
+        c.drop_x();
+        assert_eq!(c.regs, [two, three, nine, nine], "T copies down into Z");
+        c.drop_x();
+        assert_eq!(c.regs, [three, nine, nine, nine]);
+        c.drop_x();
+        assert_eq!(c.regs, [nine; 4], "and keeps refilling");
+    }
+
+    /// The classic use, and the exact sequence the README advertises: fill the stack with a
+    /// constant and every drop refills Y with it again.
+    #[test]
+    fn t_acts_as_a_constant_through_repeated_operations() {
+        let mut c = Calc::new();
+        c.set_format(2);
+        keys(&mut c, &["2", "ENTER", "ENTER", "ENTER"]);
+        let two = from_decimal_bits(&c, "2");
+        assert_eq!(c.regs, [two; 4], "the constant is in every register");
+
+        for want in ["4", "8", "16"] {
+            keys(&mut c, &["*"]);
+            assert_eq!(c.regs[0], from_decimal_bits(&c, want));
+            assert_eq!(c.regs[1], two, "T keeps refilling Y with the constant");
+        }
     }
 
     /// With a fixed stack there are no operand-count failures left to report.
@@ -691,7 +736,7 @@ mod tests {
         assert!(c.state_json().contains("\"error\":null"));
     }
 
-    /// A binary op consumes X and Y, drops the stack and backfills T.
+    /// A binary op consumes X and Y, drops the stack, and T replicates.
     #[test]
     fn binary_drops_the_stack() {
         let mut c = Calc::new();
@@ -700,7 +745,7 @@ mod tests {
         }
         // regs are X=2, Y=3, Z=5, T=7
         c.binary("add"); // 3 + 2
-        let want = ["5", "5", "7", "0"].map(|v| from_decimal_bits(&c, v));
+        let want = ["5", "5", "7", "7"].map(|v| from_decimal_bits(&c, v));
         assert_eq!(c.regs, want);
     }
 
