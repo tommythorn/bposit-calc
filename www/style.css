@@ -67,6 +67,9 @@ button { touch-action: manipulation; font-family: inherit; }
    anatomy pane scrolls. 100dvh rather than 100vh so the iOS URL bar
    collapsing does not leave the keypad off-screen. */
 .app {
+  /* Focusable so keystrokes reach the window listener without having to click first; the ring
+     would only be noise on something that is always focused. */
+  outline: none;
   display: flex;
   flex-direction: column;
   height: 100dvh;

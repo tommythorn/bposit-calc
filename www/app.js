@@ -414,6 +414,10 @@ function bindButtons() {
   $('keys').addEventListener('click', (ev) => {
     const b = ev.target.closest('button');
     if (!b) return;
+    // Hand focus back to the app: a button that keeps it would swallow the next Enter or Space
+    // by re-triggering itself.
+    b.blur();
+    $('app').focus();
     if (b.dataset.k !== undefined) typeChar(b.dataset.k);
     else if (b.dataset.op) doBinary(b.dataset.op);
     else if (b.dataset.un) doUnary(b.dataset.un);
@@ -422,6 +426,16 @@ function bindButtons() {
 }
 
 function bindKeyboard() {
+  // Keystrokes only reach a window listener once the document itself has focus, so take it up
+  // front -- otherwise typing does nothing at all until the page happens to get clicked.
+  $('app').focus();
+  // Clicking anywhere that is not a control hands focus back rather than dropping it.
+  document.addEventListener('mousedown', (ev) => {
+    if (!ev.target.closest('button, a, summary')) {
+      setTimeout(() => $('app').focus(), 0);
+    }
+  });
+
   window.addEventListener('keydown', (ev) => {
     if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
     const k = ev.key;
@@ -446,6 +460,7 @@ function bindKeyboard() {
     const action = {
       Enter: 'enter',
       Backspace: 'back',
+      Delete: 'back',
       Escape: 'clear',
       n: 'chs',
       s: 'swap',

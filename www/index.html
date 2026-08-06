@@ -18,7 +18,7 @@
 </head>
 <body>
 
-<div class="app">
+<div class="app" id="app" tabindex="-1">
 
   <header class="topbar">
     <h1>Bounded Posit <span class="rpn">RPN</span></h1>
@@ -59,7 +59,7 @@
       <p class="hint">
         Keyboard: digits, <kbd>.</kbd> <kbd>e</kbd>, <kbd>+</kbd> <kbd>-</kbd> <kbd>*</kbd> <kbd>/</kbd>,
         <kbd>Enter</kbd>, <kbd>Backspace</kbd> (drops X when not typing), <kbd>n</kbd> change sign,
-        <kbd>s</kbd> swap X and Y, <kbd>Esc</kbd> clear.
+        <kbd>s</kbd> swap X and Y, <kbd>Esc</kbd> clear, <kbd>Delete</kbd> same as <kbd>Backspace</kbd>.
         <kbd>-</kbd> is always subtract; use <kbd>n</kbd> to change sign.
         Not on the keypad but still bound: <kbd>r</kbd> reciprocal, <kbd>d</kbd> double,
         <kbd>h</kbd> halve. Type <code>0x7f</code> or <code>0b0110</code> for a raw bit pattern.
