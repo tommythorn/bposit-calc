@@ -32,8 +32,18 @@ struct LastOp {
 #[wasm_bindgen]
 pub struct Calc {
     fmt: Format,
-    /// Bit patterns, last element is stack level 1 (the top).
-    stack: Vec<u64>,
+    /// The X, Y, Z, T registers, X first.
+    ///
+    /// A fixed four-register stack in the HP manner: dropping backfills T with zero and lifting
+    /// pushes T off the end, so there is never too little or too much on it. No operation can
+    /// fail for want of operands, which is why nothing here reports an error.
+    regs: [u64; 4],
+    /// HP's stack-lift flag.
+    ///
+    /// ENTER clears it, so the next number typed *replaces* X rather than pushing it up — which
+    /// is what makes `2 ENTER 3 ×` work. Everything else sets it, so typing a digit after an
+    /// operation lifts the result out of the way first.
+    lift: bool,
     error: Option<String>,
     last: Option<LastOp>,
 }
@@ -44,13 +54,14 @@ impl Calc {
     pub fn new() -> Calc {
         Calc {
             fmt: Format::B16,
-            stack: Vec::new(),
+            regs: [0; 4],
+            lift: true,
             error: None,
             last: None,
         }
     }
 
-    /// Switch format, re-rounding every stack entry into the new one.
+    /// Switch format, re-rounding every register into the new one.
     ///
     /// Values are converted rather than reinterpreted: the numbers you were working with stay the
     /// numbers you were working with, and you get to watch their encodings change.
@@ -60,12 +71,12 @@ impl Calc {
         if to == self.fmt {
             return;
         }
-        for v in self.stack.iter_mut() {
+        for v in self.regs.iter_mut() {
             *v = format::convert(self.fmt, to, *v);
         }
         self.fmt = to;
         self.error = None;
-        // Every value was re-rounded, so the recorded operation no longer describes level 1.
+        // Every value was re-rounded, so the recorded operation no longer describes X.
         self.last = None;
     }
 
@@ -74,12 +85,48 @@ impl Calc {
         self.fmt.index()
     }
 
-    /// Push a decimal literal, rounded exactly into the current format.
+    /// Push X up into Y and put `bits` in X. T falls off the end.
+    fn lift_in(&mut self, bits: u64) {
+        self.regs = [bits, self.regs[0], self.regs[1], self.regs[2]];
+    }
+
+    /// Put `bits` in X, honouring the lift flag, then re-enable lift.
+    fn place(&mut self, bits: u64) {
+        if self.lift {
+            self.lift_in(bits);
+        } else {
+            self.regs[0] = bits;
+        }
+        self.lift = true;
+    }
+
+    /// Drop the stack: Y becomes X and T is backfilled with zero.
+    fn drop_stack(&mut self) {
+        self.regs = [self.regs[1], self.regs[2], self.regs[3], 0];
+    }
+
+    /// ENTER with nothing being typed: duplicate X and suspend the lift.
+    ///
+    /// X is unchanged, so whatever the inspector was saying about it still holds.
+    #[wasm_bindgen(js_name = enterKey)]
+    pub fn enter_key(&mut self) {
+        self.lift_in(self.regs[0]);
+        self.lift = false;
+    }
+
+    /// ENTER used to finish a number that was being typed: the digits already went into X, so
+    /// this only suspends the lift.
+    #[wasm_bindgen(js_name = endEntry)]
+    pub fn end_entry(&mut self) {
+        self.lift = false;
+    }
+
+    /// Place a decimal literal in X, rounded exactly into the current format.
     #[wasm_bindgen(js_name = pushDecimal)]
     pub fn push_decimal(&mut self, s: &str) -> bool {
         match format::from_decimal(self.fmt, s) {
             Some(bits) => {
-                self.stack.push(bits);
+                self.place(bits);
                 self.error = None;
                 // Typing a literal is itself a rounding worth inspecting: 0.1 is not
                 // representable in any of these formats.
@@ -97,22 +144,50 @@ impl Calc {
         }
     }
 
-    /// Push a raw bit pattern: `0x` prefixed for hex, otherwise read as binary.
+    /// Rebuild X from the literal currently being typed.
+    ///
+    /// Called on every keystroke: the number is built in X itself rather than in a separate entry
+    /// area, as on the real machines. The first keystroke lifts the stack if lift is enabled;
+    /// clearing the flag afterwards means later keystrokes rewrite X instead of pushing it up
+    /// again. Re-parsing the whole literal each time keeps rounding from compounding.
+    #[wasm_bindgen(js_name = typeX)]
+    pub fn type_x(&mut self, s: &str) {
+        // A half-written exponent or a lone sign is not yet a number; show what there is so far.
+        let t = s.trim();
+        let t = t.strip_suffix(['+', '-']).unwrap_or(t);
+        let t = t.strip_suffix(['e', 'E']).unwrap_or(t);
+
+        let is_bits = is_bit_literal(t);
+        let bits = if t.is_empty() {
+            Some(0)
+        } else if is_bits {
+            parse_bit_literal(t).map(|v| v & self.fmt.mask())
+        } else {
+            format::from_decimal(self.fmt, t)
+        }
+        .unwrap_or(0);
+
+        self.place(bits);
+        // Stay in entry: the next keystroke rewrites X rather than lifting again.
+        self.lift = false;
+        self.error = None;
+        self.last = if t.is_empty() || is_bits {
+            None
+        } else {
+            format::decimal_rational(t).map(|exact| LastOp {
+                expr: t.to_string(),
+                exact,
+                result: bits,
+            })
+        };
+    }
+
+    /// Place a raw bit pattern in X: `0x` prefixed for hex, otherwise read as binary.
     #[wasm_bindgen(js_name = pushBits)]
     pub fn push_bits(&mut self, s: &str) -> bool {
-        let t = s.trim().replace('_', "");
-        let parsed = if let Some(hex) = t.strip_prefix("0x").or_else(|| t.strip_prefix("0X")) {
-            u64::from_str_radix(hex, 16).ok()
-        } else {
-            let b = t
-                .strip_prefix("0b")
-                .or_else(|| t.strip_prefix("0B"))
-                .unwrap_or(&t);
-            u64::from_str_radix(b, 2).ok()
-        };
-        match parsed {
+        match parse_bit_literal(s) {
             Some(v) => {
-                self.stack.push(v & self.fmt.mask());
+                self.place(v & self.fmt.mask());
                 self.error = None;
                 // A raw pattern is not a rounding of anything.
                 self.last = None;
@@ -125,7 +200,7 @@ impl Calc {
         }
     }
 
-    /// Apply a binary operation to levels 2 and 1.
+    /// `X = Y op X`, dropping the stack.
     pub fn binary(&mut self, op: &str) {
         let op = match op {
             "add" => BinOp::Add,
@@ -137,33 +212,30 @@ impl Calc {
                 return;
             }
         };
-        if self.stack.len() < 2 {
-            self.error = Some("needs two values on the stack".into());
-            return;
-        }
-        let y = self.stack.pop().unwrap();
-        let x = self.stack.pop().unwrap();
-        let result = format::bin_op(self.fmt, op, x, y);
-        self.stack.push(result);
+        let (x, y) = (self.regs[0], self.regs[1]);
+        let result = format::bin_op(self.fmt, op, y, x);
+        self.drop_stack();
+        self.regs[0] = result;
+        self.lift = true;
         self.error = None;
-        self.last = format::exact_bin(self.fmt, op, x, y).map(|exact| LastOp {
+        self.last = format::exact_bin(self.fmt, op, y, x).map(|exact| LastOp {
             expr: format!(
                 "{} {} {}",
-                self.decimal_of(x, 12),
+                self.decimal_of(y, 12),
                 match op {
                     BinOp::Add => "+",
                     BinOp::Sub => "\u{2212}",
                     BinOp::Mul => "\u{00d7}",
                     BinOp::Div => "\u{00f7}",
                 },
-                self.decimal_of(y, 12)
+                self.decimal_of(x, 12)
             ),
             exact,
             result,
         });
     }
 
-    /// Apply a unary operation to level 1.
+    /// `X = op X`.
     pub fn unary(&mut self, op: &str) {
         let op = match op {
             "neg" => UnOp::Neg,
@@ -175,13 +247,10 @@ impl Calc {
                 return;
             }
         };
-        if self.stack.is_empty() {
-            self.error = Some("needs a value on the stack".into());
-            return;
-        }
-        let x = self.stack.pop().unwrap();
+        let x = self.regs[0];
         let result = format::un_op(self.fmt, op, x);
-        self.stack.push(result);
+        self.regs[0] = result;
+        self.lift = true;
         self.error = None;
         self.last = format::exact_un(self.fmt, op, x).map(|exact| LastOp {
             expr: match op {
@@ -195,40 +264,27 @@ impl Calc {
         });
     }
 
-    #[wasm_bindgen(js_name = dropTop)]
-    pub fn drop_top(&mut self) {
-        if self.stack.pop().is_none() {
-            self.error = Some("stack is empty".into());
-        } else {
-            self.error = None;
-        }
-        self.last = None;
-    }
-
-    pub fn swap(&mut self) {
-        let n = self.stack.len();
-        if n < 2 {
-            self.error = Some("needs two values on the stack".into());
-            return;
-        }
-        self.stack.swap(n - 1, n - 2);
+    /// Drop X; T backfills with zero.
+    #[wasm_bindgen(js_name = dropX)]
+    pub fn drop_x(&mut self) {
+        self.drop_stack();
+        self.lift = true;
         self.error = None;
         self.last = None;
     }
 
-    pub fn dup(&mut self) {
-        match self.stack.last().copied() {
-            Some(v) => {
-                self.stack.push(v);
-                self.error = None;
-                self.last = None;
-            }
-            None => self.error = Some("stack is empty".into()),
-        }
+    /// Exchange X and Y.
+    pub fn swap(&mut self) {
+        self.regs.swap(0, 1);
+        self.lift = true;
+        self.error = None;
+        self.last = None;
     }
 
+    /// Zero every register.
     pub fn clear(&mut self) {
-        self.stack.clear();
+        self.regs = [0; 4];
+        self.lift = true;
         self.error = None;
         self.last = None;
     }
@@ -239,8 +295,8 @@ impl Calc {
         let mut s = String::from("{\"format\":");
         s.push_str(&self.format_json());
         s.push_str(",\"stack\":[");
-        // Level 1 (top of stack) first, matching how the display is read.
-        for (i, bits) in self.stack.iter().rev().enumerate() {
+        // X first, matching how the display is read.
+        for (i, bits) in self.regs.iter().enumerate() {
             if i > 0 {
                 s.push(',');
             }
@@ -250,10 +306,7 @@ impl Calc {
         s.push_str(",\"lastOp\":");
         s.push_str(&self.last_op_json());
         s.push_str(",\"neighbours\":");
-        match self.stack.last() {
-            Some(bits) => s.push_str(&self.neighbours_json(*bits)),
-            None => s.push_str("null"),
-        }
+        s.push_str(&self.neighbours_json(self.regs[0]));
         s.push_str(",\"error\":");
         match &self.error {
             Some(e) => push_json_string(&mut s, e),
@@ -331,8 +384,8 @@ impl Calc {
         let Some(last) = &self.last else {
             return "null".to_string();
         };
-        // Only describes level 1 while level 1 is still that result.
-        if self.stack.last() != Some(&last.result) {
+        // Only describes X while X is still that result.
+        if self.regs[0] != last.result {
             return "null".to_string();
         }
         let Some(rounded) = format::rational_of(fmt, last.result) else {
@@ -520,6 +573,26 @@ impl Default for Calc {
     }
 }
 
+/// Whether a literal is a raw bit pattern rather than a decimal number.
+fn is_bit_literal(s: &str) -> bool {
+    let t = s.trim();
+    t.starts_with("0x") || t.starts_with("0X") || t.starts_with("0b") || t.starts_with("0B")
+}
+
+/// Parse `0x…` as hex, anything else as binary.
+fn parse_bit_literal(s: &str) -> Option<u64> {
+    let t = s.trim().replace('_', "");
+    if let Some(hex) = t.strip_prefix("0x").or_else(|| t.strip_prefix("0X")) {
+        u64::from_str_radix(hex, 16).ok()
+    } else {
+        let b = t
+            .strip_prefix("0b")
+            .or_else(|| t.strip_prefix("0B"))
+            .unwrap_or(&t);
+        u64::from_str_radix(b, 2).ok()
+    }
+}
+
 /// Append `v` as a quoted, escaped JSON string.
 fn push_json_string(out: &mut String, v: &str) {
     out.push('"');
@@ -572,15 +645,143 @@ mod tests {
     }
 
     #[test]
-    fn stack_order_and_errors() {
+    fn operand_order() {
         let mut c = Calc::new();
         c.push_decimal("1");
         c.push_decimal("2");
-        c.binary("sub"); // 1 - 2
-        assert!(c.state_json().contains("\"decimal\":\"-1\""));
-        c.clear();
-        c.binary("add");
-        assert!(c.state_json().contains("needs two values"));
+        c.binary("sub"); // Y - X = 1 - 2
+        assert_eq!(c.regs[0], from_decimal_bits(&c, "-1"));
+    }
+
+    fn from_decimal_bits(c: &Calc, s: &str) -> u64 {
+        format::from_decimal(c.fmt, s).unwrap()
+    }
+
+    /// The four registers are always present, so nothing can under- or overflow.
+    #[test]
+    fn stack_is_always_four_deep() {
+        let mut c = Calc::new();
+        assert_eq!(c.regs, [0; 4]);
+
+        for v in ["1", "2", "3", "4", "5"] {
+            c.push_decimal(v);
+        }
+        // The fifth push pushed the first value off the end.
+        let want = ["5", "4", "3", "2"].map(|v| from_decimal_bits(&c, v));
+        assert_eq!(c.regs, want);
+
+        // Dropping backfills T with zero rather than running out.
+        for _ in 0..4 {
+            c.drop_x();
+        }
+        assert_eq!(c.regs, [0; 4]);
+    }
+
+    /// With a fixed stack there are no operand-count failures left to report.
+    #[test]
+    fn operations_never_error() {
+        let mut c = Calc::new();
+        for op in ["add", "sub", "mul", "div"] {
+            c.binary(op);
+            assert!(c.state_json().contains("\"error\":null"), "{op}");
+        }
+        c.drop_x();
+        c.swap();
+        c.enter_key();
+        assert!(c.state_json().contains("\"error\":null"));
+    }
+
+    /// A binary op consumes X and Y, drops the stack and backfills T.
+    #[test]
+    fn binary_drops_the_stack() {
+        let mut c = Calc::new();
+        for v in ["7", "5", "3", "2"] {
+            c.push_decimal(v);
+        }
+        // regs are X=2, Y=3, Z=5, T=7
+        c.binary("add"); // 3 + 2
+        let want = ["5", "5", "7", "0"].map(|v| from_decimal_bits(&c, v));
+        assert_eq!(c.regs, want);
+    }
+
+    /// ENTER duplicates X and suspends the lift, so the next number typed replaces the copy and
+    /// leaves the original in Y. This is what makes `2 ENTER 3 x` work.
+    #[test]
+    fn enter_duplicates_then_the_next_number_overwrites() {
+        let mut c = Calc::new();
+        c.type_x("2");
+        c.enter_key();
+        assert_eq!(c.regs[0], c.regs[1], "ENTER duplicates X");
+        assert!(!c.lift, "ENTER suspends the lift");
+
+        c.type_x("3");
+        assert_eq!(c.regs[0], from_decimal_bits(&c, "3"));
+        assert_eq!(
+            c.regs[1],
+            from_decimal_bits(&c, "2"),
+            "the original stays in Y"
+        );
+
+        c.binary("mul");
+        assert_eq!(c.regs[0], from_decimal_bits(&c, "6"));
+    }
+
+    /// After anything other than ENTER, typing lifts the previous value out of the way.
+    #[test]
+    fn typing_after_an_operation_lifts() {
+        let mut c = Calc::new();
+        c.type_x("2");
+        c.enter_key();
+        c.type_x("3");
+        c.binary("add"); // X = 5, and the lift is re-enabled
+        assert!(c.lift);
+
+        c.type_x("4");
+        assert_eq!(c.regs[0], from_decimal_bits(&c, "4"));
+        assert_eq!(
+            c.regs[1],
+            from_decimal_bits(&c, "5"),
+            "the result was pushed up"
+        );
+    }
+
+    /// Successive keystrokes rewrite X rather than lifting again, and re-parse the whole literal
+    /// so rounding does not compound.
+    #[test]
+    fn typing_builds_in_x_without_repeated_lifts() {
+        let mut c = Calc::new();
+        c.set_format(2);
+        c.push_decimal("9");
+        for prefix in ["1", "1.", "1.2", "1.25"] {
+            c.type_x(prefix);
+        }
+        assert_eq!(c.regs[0], from_decimal_bits(&c, "1.25"));
+        assert_eq!(
+            c.regs[1],
+            from_decimal_bits(&c, "9"),
+            "only one lift happened"
+        );
+        assert_eq!(c.regs[2], 0);
+    }
+
+    /// Half-written literals are shown as far as they go rather than collapsing to zero.
+    #[test]
+    fn partial_literals_are_tolerated() {
+        let mut c = Calc::new();
+        c.set_format(2);
+        c.type_x("");
+        assert_eq!(c.regs[0], 0);
+        c.type_x("1");
+        c.type_x("1e");
+        assert_eq!(
+            c.regs[0],
+            from_decimal_bits(&c, "1"),
+            "a dangling exponent is ignored"
+        );
+        c.type_x("1e-");
+        assert_eq!(c.regs[0], from_decimal_bits(&c, "1"));
+        c.type_x("1e-2");
+        assert_eq!(c.regs[0], from_decimal_bits(&c, "0.01"));
     }
 
     #[test]
@@ -675,7 +876,7 @@ mod tests {
         c.binary("add");
         assert!(c.state_json().contains("\"tie\":true"));
 
-        c.drop_top();
+        c.drop_x();
         assert!(c.state_json().contains("\"lastOp\":null"));
 
         // A format switch re-rounds everything, so the recorded operation no longer applies.

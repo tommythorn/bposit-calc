@@ -65,18 +65,36 @@ The page is a fixed-viewport app rather than a scrolling document, and carries a
 
 ### Using it
 
-Standard RPN. Type a number, `ENTER` to push, then an operator consumes the top of the stack.
-Operations are `+ - x /`, `1/x`, `x·2`, `x/2`, and `+/-`.
+A fixed four-register stack in the HP manner — X, Y, Z, T, always all four. Dropping backfills T
+with zero and lifting pushes T off the end, so there is never too little or too much on it and no
+operation can fail. There are no error messages because there is nothing left to go wrong.
 
-Keyboard: digits, `.`, `e`, `+ - * /`, `Enter`, `Backspace` (drops when not typing), `n` negate,
-`r` reciprocal, `d` double, `h` halve, `s` swap, `Esc` clear. Note `-` is always subtract; use `n`
-to change sign.
+```
+[ENTER] [x⇄y] [+/−] [E] [⌫]
+ 7  8  9  ÷
+ 4  5  6  ×
+ 1  2  3  −
+ 0  .     +
+```
 
-Typing `0x7f` or `0b0110` pushes a **raw bit pattern** instead of a number, which is the fastest
+Numbers are built in **X itself** — there is no separate entry line — so the bit-field display
+updates as you type and you can watch the encoding re-carve digit by digit.
+
+`ENTER` duplicates X and suspends the stack lift, so the next number typed replaces the copy and
+leaves the original in Y: `2 ENTER 3 ×` gives 6. After anything else the lift is enabled again, so
+typing a digit pushes the previous value up out of the way first.
+
+`⌫` deletes a digit while typing, and drops X otherwise.
+
+Keyboard: digits, `.`, `e`, `+ - * /`, `Enter`, `Backspace`, `n` change sign, `s` swap X and Y,
+`Esc` clear. Note `-` is always subtract; use `n` to change sign. Not on the keypad but still
+bound: `r` reciprocal, `d` double, `h` halve.
+
+Typing `0x7f` or `0b0110` builds a **raw bit pattern** instead of a number, which is the fastest
 way to go exploring the encoding.
 
-Switching format converts the values on the stack rather than reinterpreting the bits, so you can
-watch the same number re-encode itself as you move between formats.
+Switching format converts the values in the registers rather than reinterpreting the bits, so you
+can watch the same number re-encode itself as you move between formats.
 
 ## The rounding inspector
 

@@ -30,9 +30,6 @@
   <main>
     <section class="panel display">
       <div class="stack" id="stack"></div>
-      <div class="entryline">
-        <span class="prompt">&gt;</span><span class="entry" id="entry"></span><span class="caret"></span>
-      </div>
       <div class="error" id="error"></div>
     </section>
 
@@ -40,30 +37,32 @@
 
     <section class="panel keypad">
       <div class="keys" id="keys">
+        <button data-act="enter" class="enter k-enter">ENTER</button>
+        <button data-act="swap" class="k-small">x&#8646;y</button>
+        <button data-act="chs" class="k-small">+/&minus;</button>
+        <button data-k="e" class="k-small">E</button>
+        <button data-act="back" class="k-small">&#9003;</button>
+
         <button data-k="7">7</button><button data-k="8">8</button><button data-k="9">9</button>
-        <button data-op="div" class="op">&divide;</button><button data-un="recip" class="op">1/x</button>
+        <button data-op="div" class="op">&divide;</button>
 
         <button data-k="4">4</button><button data-k="5">5</button><button data-k="6">6</button>
-        <button data-op="mul" class="op">&times;</button><button data-un="double" class="op">x&middot;2</button>
+        <button data-op="mul" class="op">&times;</button>
 
         <button data-k="1">1</button><button data-k="2">2</button><button data-k="3">3</button>
-        <button data-op="sub" class="op">&minus;</button><button data-un="half" class="op">x/2</button>
+        <button data-op="sub" class="op">&minus;</button>
 
-        <button data-k="0">0</button><button data-k=".">.</button><button data-k="e">e</button>
-        <button data-op="add" class="op">+</button><button data-act="chs" class="op">+/&minus;</button>
-
-        <button data-act="enter" class="wide enter">ENTER</button>
-        <button data-act="swap">SWAP</button>
-        <button data-act="dup">DUP</button>
-        <button data-act="back">&#9003;</button>
-        <button data-act="clear" class="danger">CLR</button>
+        <button data-k="0">0</button><button data-k=".">.</button>
+        <span class="k-pad"></span>
+        <button data-op="add" class="op">+</button>
       </div>
       <p class="hint">
         Keyboard: digits, <kbd>.</kbd> <kbd>e</kbd>, <kbd>+</kbd> <kbd>-</kbd> <kbd>*</kbd> <kbd>/</kbd>,
-        <kbd>Enter</kbd>, <kbd>Backspace</kbd> (drops when not typing), <kbd>n</kbd> negate,
-        <kbd>r</kbd> reciprocal, <kbd>d</kbd> double, <kbd>h</kbd> halve, <kbd>s</kbd> swap,
-        <kbd>Esc</kbd> clear. <kbd>-</kbd> is always subtract; use <kbd>n</kbd> to change sign.
-        Type <code>0x7f</code> or <code>0b0110</code> to enter a raw bit pattern.
+        <kbd>Enter</kbd>, <kbd>Backspace</kbd> (drops X when not typing), <kbd>n</kbd> change sign,
+        <kbd>s</kbd> swap X and Y, <kbd>Esc</kbd> clear.
+        <kbd>-</kbd> is always subtract; use <kbd>n</kbd> to change sign.
+        Not on the keypad but still bound: <kbd>r</kbd> reciprocal, <kbd>d</kbd> double,
+        <kbd>h</kbd> halve. Type <code>0x7f</code> or <code>0b0110</code> for a raw bit pattern.
       </p>
     </section>
   </main>

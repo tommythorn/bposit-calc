@@ -2,9 +2,8 @@ import init, { Calc } from './pkg/bposit_calc.js';
 
 const FORMAT_NAMES = ['BPosit8', 'BPosit16', 'BPosit32', 'BPosit64'];
 
-/** Minimum stack levels drawn, and the most we ever draw. */
-const MIN_LEVELS = 4;
-const MAX_LEVELS = 8;
+/** The stack is the four HP registers, always all of them. */
+const LEVELS = 4;
 
 let calc;
 /** The literal currently being typed. Empty means "not typing". */
@@ -23,23 +22,37 @@ const countDigits = (s) => s.replace(/[-.]/g, '').replace(/^0+/, '').length;
 /** True when the entry is a raw bit pattern rather than a decimal literal. */
 const isBitEntry = (s = entry) => /^0[xXbB]/.test(s);
 
-function commitEntry() {
-  if (entry === '') return;
-  const s = entry;
+/**
+ * Whether `c` may be appended, so the entry line can never hold something unparseable.
+ *
+ * With a four-register stack no operation can fail, and guarding entry here is what makes the
+ * "no errors, ever" property hold for typing too.
+ */
+function canType(c) {
+  // Hex digits belong to `0x...`; `0b...` takes only bits.
+  if (isBitEntry()) return /^0[xX]/.test(entry) ? /^[0-9a-fA-F]$/.test(c) : /^[01]$/.test(c);
+  if (/^[0-9]$/.test(c)) return true;
+  const [mantissa, exponent] = entry.split(/[eE]/);
+  if (c === '.') return exponent === undefined && !mantissa.includes('.');
+  if (c === 'e' || c === 'E') return exponent === undefined && /[0-9]/.test(entry);
+  if (c === '-' || c === '+') return exponent === '';
+  if (c === 'x' || c === 'X' || c === 'b' || c === 'B') return entry === '0';
+  return false;
+}
+
+/** The digits are already in X, so finishing entry is just forgetting the text. */
+function endEntry() {
   entry = '';
-  const ok = isBitEntry(s) ? calc.pushBits(s) : calc.pushDecimal(s);
-  // Keep an unparseable literal on the entry line so it can be corrected.
-  if (!ok) entry = s;
 }
 
 function doBinary(op) {
-  commitEntry();
+  endEntry();
   calc.binary(op);
   render();
 }
 
 function doUnary(op) {
-  commitEntry();
+  endEntry();
   calc.unary(op);
   render();
 }
@@ -47,29 +60,38 @@ function doUnary(op) {
 function doAction(act) {
   switch (act) {
     case 'enter':
-      if (entry !== '') commitEntry();
-      else calc.dup();
+      // Finishing a typed number just ends entry -- the digits are already in X. With nothing
+      // being typed, ENTER duplicates X. Either way the lift is suspended, so the next digit
+      // overwrites X rather than pushing it up.
+      if (entry !== '') {
+        endEntry();
+        calc.endEntry();
+      } else {
+        calc.enterKey();
+      }
       break;
     case 'chs':
       // While typing, +/- flips the sign of the literal; otherwise it negates level 1.
       if (entry !== '' && !isBitEntry()) {
         entry = entry.startsWith('-') ? entry.slice(1) : '-' + entry;
+        calc.typeX(entry);
       } else {
-        commitEntry();
+        endEntry();
         calc.unary('neg');
       }
       break;
     case 'back':
-      if (entry !== '') entry = entry.slice(0, -1);
-      else calc.dropTop();
+      // While typing, back up a character; the last one leaves X at zero. Otherwise drop X.
+      if (entry !== '') {
+        entry = entry.slice(0, -1);
+        calc.typeX(entry);
+      } else {
+        calc.dropX();
+      }
       break;
     case 'swap':
-      commitEntry();
+      endEntry();
       calc.swap();
-      break;
-    case 'dup':
-      commitEntry();
-      calc.dup();
       break;
     case 'clear':
       entry = '';
@@ -80,7 +102,9 @@ function doAction(act) {
 }
 
 function typeChar(c) {
+  if (!canType(c)) return;
   entry += c;
+  calc.typeX(entry);
   render();
 }
 
@@ -156,19 +180,20 @@ function renderFacts(fmt) {
 }
 
 function renderStack(stack) {
-  const shown = Math.min(Math.max(MIN_LEVELS, stack.length), MAX_LEVELS);
   let html = '';
-  // Level 1 is the top of the stack and is drawn last, nearest the entry line.
-  for (let lvl = shown; lvl >= 1; lvl--) {
+  // X is level 1 and is drawn last, at the bottom.
+  for (let lvl = LEVELS; lvl >= 1; lvl--) {
     const e = stack[lvl - 1];
-    if (!e) {
-      html += `<div class="level empty"><span class="tag">${lvl}:</span><span class="val">&mdash;</span></div>`;
-      continue;
-    }
     const v = e.bounded;
-    html += `<div class="level">
+    // While typing, X shows the digits as entered rather than the value they rounded to --
+    // otherwise typing "0.1" in BPosit8 would replace itself with 0.099609375 mid-keystroke.
+    const typing = lvl === 1 && entry !== '';
+    const shown = typing
+      ? `${esc(entry)}<span class="caret"></span>`
+      : `${esc(v.decimal)}`;
+    html += `<div class="level${typing ? ' typing' : ''}">
       <span class="tag">${lvl}:</span>
-      <span class="val${v.decimalExact ? '' : ' approx'}">${esc(v.decimal)}</span>
+      <span class="val${!typing && !v.decimalExact ? ' approx' : ''}">${shown}</span>
       <span class="rowbits mono">${bitRowHtml(e.bits, v)}</span>
     </div>`;
   }
@@ -365,7 +390,6 @@ function render() {
   renderStack(state.stack);
   renderAnatomy(state.stack[0], state.format, state.lastOp, state.neighbours);
 
-  $('entry').textContent = entry;
   $('error').textContent = state.error || '';
 
   const active = calc.formatIndex();
@@ -383,8 +407,8 @@ function buildFormatButtons() {
   $('formats').addEventListener('click', (ev) => {
     const b = ev.target.closest('button');
     if (!b) return;
-    // Commit anything half-typed so it is converted along with the rest of the stack.
-    commitEntry();
+    // Whatever was being typed is already in X, and gets converted with the rest.
+    endEntry();
     calc.setFormat(Number(b.dataset.fmt));
     render();
   });
@@ -406,26 +430,9 @@ function bindKeyboard() {
     if (ev.ctrlKey || ev.metaKey || ev.altKey) return;
     const k = ev.key;
 
-    // Inside a raw bit pattern every hex letter is a digit, not a shortcut.
-    if (isBitEntry() && /^[0-9a-fA-F]$/.test(k)) {
-      ev.preventDefault();
-      return typeChar(k);
-    }
-    if (/^[0-9]$/.test(k) || k === '.') {
-      ev.preventDefault();
-      return typeChar(k);
-    }
-    // 'e' starts an exponent; '0x'/'0b' start a bit pattern.
-    if ((k === 'e' || k === 'E') && entry !== '' && !/[eE]/.test(entry)) {
-      ev.preventDefault();
-      return typeChar(k);
-    }
-    if ((k === 'x' || k === 'X' || k === 'b' || k === 'B') && entry === '0') {
-      ev.preventDefault();
-      return typeChar(k);
-    }
-    // A sign directly after the exponent marker belongs to the literal.
-    if ((k === '-' || k === '+') && /[eE]$/.test(entry)) {
+    // Anything the entry line will accept is typing, not a shortcut. That keeps hex digits
+    // working inside `0x...` without stealing `d` or `e` the rest of the time.
+    if (canType(k)) {
       ev.preventDefault();
       return typeChar(k);
     }
@@ -446,7 +453,6 @@ function bindKeyboard() {
       Escape: 'clear',
       n: 'chs',
       s: 'swap',
-      ' ': 'dup',
     }[k];
     if (action) {
       ev.preventDefault();
