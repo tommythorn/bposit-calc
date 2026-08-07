@@ -4,7 +4,7 @@ An HP-42S style RPN calculator for **bounded posits**, running in the browser as
 
 **[Live demo →](https://tommythorn.github.io/bposit-calc/)**
 
-The arithmetic is almost incidental. The point is the display: every value on the stack is shown
+The point is the display: every value on the stack is shown
 decomposed into its sign / regime / terminator / exponent / fraction fields, next to what the same
 bit pattern would mean if the regime were *not* capped. It exists to make the behaviour of bounded
 posits legible rather than to compute anything in particular.
